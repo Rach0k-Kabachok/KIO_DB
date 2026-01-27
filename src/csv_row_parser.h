@@ -3,15 +3,17 @@
 #include <vector>
 #include <string>
 #include <sstream>
+#include <stdexcept>
 
 class CSVRowParser {
     using ParsedRow = std::vector<std::string>;
 
-    static constexpr char separator = ',';
-    std::istringstream buffer_stream;
+    static constexpr char kSeparator = ',';
+    std::istringstream buffer_stream_;
 
 public:
-    explicit CSVRowParser(const std::string &filename) : buffer_stream(filename, std::ios::binary) {
+    explicit CSVRowParser(std::string &&buffer)
+        : buffer_stream_(std::move(buffer)) {
     }
 
     ParsedRow ParseNext() {
@@ -19,8 +21,8 @@ public:
         std::string cur_line;
         std::string elem;
 
-        if (!std::getline(buffer_stream, cur_line)) {
-            if (buffer_stream.eof()) {
+        if (!std::getline(buffer_stream_, cur_line)) {
+            if (buffer_stream_.eof()) {
                 return {};
             }
             throw std::runtime_error("std::getline failed");
@@ -38,18 +40,20 @@ public:
                 } else if (cur_line[i + 1] == '"') {
                     elem += '"';
                     i++;
-                } else if (cur_line[i + 1] == separator) {
+                } else if (cur_line[i + 1] == kSeparator) {
                     in_quote = false;
                     result.emplace_back(std::move(elem));
                     i++;
                 } else {
-                    throw std::invalid_argument("Missed quote in row\n" + cur_line);
+                    throw std::invalid_argument("Missed quote in row\n" +
+                                                cur_line);
                 }
-            } else if (symb == separator) {
+            } else if (symb == kSeparator) {
                 if (in_quote) {
                     elem += symb;
                 } else {
                     result.emplace_back(std::move(elem));
+                    elem.clear();
                 }
             } else {
                 elem += symb;

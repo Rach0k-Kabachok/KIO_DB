@@ -4,59 +4,68 @@
 #include <vector>
 #include <string>
 #include <fstream>
+#include <stdexcept>
 
 class CSVBatchReader {
+    using ParsedBatch = std::vector<std::vector<std::string> >;
+    using ParsedRow = std::vector<std::string>;
+
+    static constexpr size_t kBatchSizeBytes = 1 << 20;  // 1 MB
+    std::ifstream csv_stream_;
+    bool eof_reached_ = false;
+
 public:
-  using ParsedBatch = std::vector<std::vector<std::string> >;
-
-private:
-  static constexpr size_t batch_size_bytes = 1 << 23; // 1 MB
-  std::ifstream csv_stream;
-  bool eof_reached = false;
-
-public:
-  explicit CSVBatchReader(const std::string &filename)
-    : csv_stream(filename, std::ios::binary) {
-    if (!csv_stream.is_open()) {
-      throw std::runtime_error("Failed to open file: " + filename);
-    }
-  }
-
-  ParsedBatch ParseNextBatch() {
-    if (eof_reached) {
-      return {};
+    explicit CSVBatchReader(const std::string &filename)
+        : csv_stream_(filename, std::ios::binary) {
+        if (!csv_stream_.is_open()) {
+            throw std::runtime_error("Failed to open file: " + filename);
+        }
     }
 
-    std::string buffer(batch_size_bytes, '\0');
-    csv_stream.read(buffer.data(), batch_size_bytes);
+    CSVBatchReader(CSVBatchReader &&) = default;
+    CSVBatchReader &operator=(CSVBatchReader &&) = default;
 
-    if (csv_stream.gcount() == 0) {
-      eof_reached = true;
-      return {};
+    CSVBatchReader(const CSVBatchReader &) = delete;
+    CSVBatchReader &operator=(const CSVBatchReader &) = delete;
+
+    ParsedBatch ParseNextBatch() {
+        if (eof_reached_) {
+            return {};
+        }
+
+        std::string buffer(kBatchSizeBytes, '\0');
+        csv_stream_.read(buffer.data(), kBatchSizeBytes);
+
+        if (csv_stream_.gcount() == 0) {
+            eof_reached_ = true;
+            return {};
+        }
+
+        buffer.resize(csv_stream_.gcount());
+        if (buffer.back() != '\n') {
+            std::string tail;
+            std::getline(csv_stream_, tail);
+            buffer += tail;
+            buffer += '\n';
+        }
+
+        if (csv_stream_.eof()) {
+            eof_reached_ = true;
+        }
+
+        ParsedBatch result;
+        CSVRowParser row_parser(std::move(buffer));
+        ParsedRow row;
+
+        while (!(row = row_parser.ParseNext()).empty()) {
+            result.emplace_back(std::move(row));
+        }
+
+        return result;
     }
 
-    if (buffer.back() != '\n') {
-      std::string tail;
-      std::getline(csv_stream, tail);
-      buffer += tail;
+    bool IsEOF() const {
+        return eof_reached_;
     }
 
-    if (csv_stream.eof()) {
-      eof_reached = true;
-    }
-
-    ParsedBatch result;
-    CSVRowParser row_parser(buffer);
-    std::vector<std::string> row;
-
-    while (!(row = row_parser.ParseNext()).empty()) {
-      result.emplace_back(std::move(row));
-    }
-
-    return result;
-  }
-
-  bool IsEOF() const {
-    return eof_reached;
-  }
 };
