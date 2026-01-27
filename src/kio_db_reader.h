@@ -7,7 +7,7 @@
 #include <stdexcept>
 #include <cstring>
 
-namespace Kio {
+namespace kio {
     using Column = std::variant<std::vector<int64_t>, std::vector<std::string>>;
     using ColumnarBatch = std::vector<Column>;
 
@@ -25,10 +25,9 @@ namespace Kio {
 }
 
 class KioDbReader {
-private:
     std::string filename_;
     std::ifstream file_;
-    std::vector<Kio::BatchMeta> meta_index_;
+    std::vector<kio::BatchMeta> meta_index_;
 
 public:
     KioDbReader(const std::string& filename)
@@ -62,13 +61,13 @@ public:
     }
 
     // Читает конкретный батч по индексу
-    Kio::ColumnarBatch ReadBatch(size_t batch_index) {
+    kio::ColumnarBatch ReadBatch(size_t batch_index) {
         if (batch_index >= meta_index_.size()) {
             throw std::out_of_range("Batch index out of range: " + std::to_string(batch_index));
         }
 
         const auto& batch_meta = meta_index_[batch_index];
-        Kio::ColumnarBatch result_batch;
+        kio::ColumnarBatch result_batch;
         result_batch.reserve(batch_meta.columns_info.size());
 
         // Читаем каждую колонку согласно её типу (из метаданных файла)
@@ -111,7 +110,7 @@ private:
 
         // 4. Читаем индекс каждого батча
         for (size_t i = 0; i < batch_count; ++i) {
-            Kio::BatchMeta meta;
+            kio::BatchMeta meta;
 
             // Читаем ID батча
             file_.read(reinterpret_cast<char*>(&meta.batch_id), sizeof(meta.batch_id));
@@ -128,7 +127,7 @@ private:
 
             // Читаем метаданные каждой колонки (включая ТИП)
             for (size_t c = 0; c < col_count; ++c) {
-                Kio::ColumnChunkMeta col;
+                kio::ColumnChunkMeta col;
 
                 file_.read(reinterpret_cast<char*>(&col.type), sizeof(col.type));
                 file_.read(reinterpret_cast<char*>(&col.offset), sizeof(col.offset));
@@ -147,7 +146,7 @@ private:
     }
 
     // Чтение int64 колонки
-    std::vector<int64_t> ReadIntColumn(const Kio::ColumnChunkMeta& meta) {
+    std::vector<int64_t> ReadIntColumn(const kio::ColumnChunkMeta& meta) {
         std::vector<int64_t> vec(meta.count);
 
         if (meta.count == 0) {
@@ -165,7 +164,7 @@ private:
     }
 
     // Чтение string колонки
-    std::vector<std::string> ReadStringColumn(const Kio::ColumnChunkMeta& meta) {
+    std::vector<std::string> ReadStringColumn(const kio::ColumnChunkMeta& meta) {
         std::vector<std::string> vec;
         vec.reserve(meta.count);
 

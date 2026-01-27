@@ -23,9 +23,9 @@ TEST(BatchFormatterTest, MakeFileColumnar) {
     }
 
     CSVFormatter reader(path_csv, path_schema);
-    Kio::ColumnarBatch expected = {
-        Kio::Column{std::vector<std::string>{"a", "b"}},
-        Kio::Column{std::vector<int64_t>{1, 2}}
+    kio::ColumnarBatch expected = {
+        kio::Column{std::vector<std::string>{"a", "b"}},
+        kio::Column{std::vector<int64_t>{1, 2}}
     };
     EXPECT_EQ(reader.MakeColumnarBatch(), expected);
 
