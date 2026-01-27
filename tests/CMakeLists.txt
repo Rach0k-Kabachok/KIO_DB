@@ -1,5 +1,7 @@
 add_executable(kio_db_tests
-        example_test.cpp
+        csv_rw/row_parser_test.cpp
+        csv_rw/batch_reader_test.cpp
+        csv_rw/csv_formater.cpp
 )
 
 target_link_libraries(kio_db_tests PRIVATE

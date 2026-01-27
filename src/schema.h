@@ -89,6 +89,18 @@ struct Schema {
         return is_empty_;
     }
 
+    const std::unordered_map<std::string, size_t> &GetNameToIndex() {
+        return names_to_index_;
+    }
+
+    const std::vector<Types> &GetIndexToType() {
+        return index_to_types_;
+    }
+
+    const std::vector<std::string> &GetIndexToName() {
+        return index_to_names_;
+    }
+
 private:
     std::unordered_map<std::string, size_t> names_to_index_;
     std::vector<Types> index_to_types_;

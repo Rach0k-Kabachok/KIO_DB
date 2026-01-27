@@ -86,4 +86,8 @@ public:
     const Schema& GetSchema() const {
         return schema_;
     }
+
+    Schema GetSchema() {
+        return schema_;
+    }
 };
