@@ -1,4 +1,4 @@
-#include "csv_row_parser.h"
+#include "csv_work/csv_row_parser.h"
 #include "gtest/gtest.h"
 
 TEST(RowParserTest, JustWorks) {
@@ -19,7 +19,6 @@ TEST(RowParserTest, InQuote) {
     EXPECT_EQ(parser.ParseNext(), expected);
 }
 
-
 TEST(RowParserTest, Comma) {
     CSVRowParser parser(R"("a,b",c,d,"e,f")");
     std::vector<std::string> expected{"a,b", "c", "d", "e,f"};
@@ -27,8 +26,9 @@ TEST(RowParserTest, Comma) {
 }
 
 TEST(RowParserTest, EmptyField) {
-    CSVRowParser parser("a,,\n"
-                        "a,b,\n");
+    CSVRowParser parser(
+        "a,,\n"
+        "a,b,\n");
 
     std::vector<std::string> expected = {"a", "", ""};
     EXPECT_EQ(parser.ParseNext(), expected);
