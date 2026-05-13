@@ -26,6 +26,59 @@ kio::ColumnChunkMeta ReadColumnChunkMeta(const std::string& batch, size_t& pos) 
 
     return chunk_meta;
 }
+
+
+template <Schema::Types Type>
+ctp::Column ReadColumn(
+    size_t& pos,
+    uint64_t row_num,
+    const kio::ColumnChunkMeta& chunk_meta,
+    const std::string& batch
+);
+
+template <>
+ctp::Column ReadColumn<Schema::STRING>(size_t& pos, uint64_t row_num,
+                                      const kio::ColumnChunkMeta& chunk_meta,
+                                      const std::string& batch) {
+    std::vector<std::string> result;
+    result.reserve(row_num);
+
+    std::vector<uint64_t> str_sizes(row_num);
+    uint64_t sizes_bytes = row_num * sizeof(uint64_t);
+    EnsureAvailable(batch, pos, sizes_bytes);
+    std::memcpy(str_sizes.data(), batch.data() + pos, sizes_bytes);
+    pos += sizes_bytes;
+
+    uint64_t strings_size = 0;
+    for (const auto& sz : str_sizes) {
+        strings_size += sz;
+        EnsureAvailable(batch, pos, sz);
+        result.emplace_back(batch.data() + pos, sz);
+        pos += sz;
+    }
+    if (strings_size != chunk_meta.size) {
+        throw std::runtime_error("Corrupted KIO batch: string column size mismatch");
+    }
+
+    return result;
+}
+
+template <>
+ctp::Column ReadColumn<Schema::INT64>(size_t& pos, uint64_t row_num,
+                                      const kio::ColumnChunkMeta& chunk_meta,
+                                      const std::string& batch) {
+    uint64_t expected_size = row_num * sizeof(int64_t);
+    if (chunk_meta.size != expected_size) {
+        throw std::runtime_error("Corrupted KIO batch: numeric column size mismatch");
+    }
+
+    std::vector<int64_t> result(row_num);
+    EnsureAvailable(batch, pos, expected_size);
+    std::memcpy(result.data(), batch.data() + pos, expected_size);
+    pos += expected_size;
+    return result;
+}
+
 }  // namespace
 
 KioDbReader::KioDbReader(const std::string& db_filename, const Schema& schema): 
@@ -61,10 +114,10 @@ ctp::ColumnarBatch KioDbReader::ReadNextBatch() {
 
         switch (chunk_meta.type) {
             case Schema::INT64:
-                batch.emplace_back(ReadNumColumn(pos, batch_meta.row_num, chunk_meta, readed_batch));
+                batch.emplace_back(ReadColumn<Schema::INT64>(pos, batch_meta.row_num, chunk_meta, readed_batch));
                 break;
             case Schema::STRING:
-                batch.emplace_back(ReadStrColumn(pos, batch_meta.row_num, chunk_meta, readed_batch));
+                batch.emplace_back(ReadColumn<Schema::STRING>(pos, batch_meta.row_num, chunk_meta, readed_batch));
                 break;
             default:
                 throw std::runtime_error("Unsupported column type in batch import");
@@ -76,45 +129,4 @@ ctp::ColumnarBatch KioDbReader::ReadNextBatch() {
     }
 
     return batch;
-}
-
-ctp::Column KioDbReader::ReadStrColumn(size_t& pos, uint64_t row_num,
-                                      const kio::ColumnChunkMeta& chunk_meta,
-                                      const std::string& batch) {
-    std::vector<std::string> result;
-    result.reserve(row_num);
-
-    std::vector<uint64_t> str_sizes(row_num);
-    uint64_t sizes_bytes = row_num * sizeof(uint64_t);
-    EnsureAvailable(batch, pos, sizes_bytes);
-    std::memcpy(str_sizes.data(), batch.data() + pos, sizes_bytes);
-    pos += sizes_bytes;
-
-    uint64_t strings_size = 0;
-    for (const auto& sz : str_sizes) {
-        strings_size += sz;
-        EnsureAvailable(batch, pos, sz);
-        result.emplace_back(batch.data() + pos, sz);
-        pos += sz;
-    }
-    if (strings_size != chunk_meta.size) {
-        throw std::runtime_error("Corrupted KIO batch: string column size mismatch");
-    }
-
-    return result;
-}
-
-ctp::Column KioDbReader::ReadNumColumn(size_t& pos, uint64_t row_num,
-                                      const kio::ColumnChunkMeta& chunk_meta,
-                                      const std::string& batch) {
-    uint64_t expected_size = row_num * sizeof(int64_t);
-    if (chunk_meta.size != expected_size) {
-        throw std::runtime_error("Corrupted KIO batch: numeric column size mismatch");
-    }
-
-    std::vector<int64_t> result(row_num);
-    EnsureAvailable(batch, pos, expected_size);
-    std::memcpy(result.data(), batch.data() + pos, expected_size);
-    pos += expected_size;
-    return result;
 }
