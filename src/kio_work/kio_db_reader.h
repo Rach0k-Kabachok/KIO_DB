@@ -4,6 +4,7 @@
 #include <fstream>
 #include <string>
 #include <cstdint>
+#include <vector>
 
 #include "columnar_types.h"
 #include "schema.h"
@@ -11,21 +12,24 @@
 class KioDbReader {
 
 public:
-    KioDbReader(const std::string& db_filename, const Schema& schema);
+    explicit KioDbReader(const std::string& db_filename);
+
+    const Schema& GetSchema() const;
+
+    const std::vector<std::string>& GetColumnNames() const;
+    const std::vector<Schema::Types>& GetColumnTypes() const;
+
+    void LoadSchema(Schema& schema) const;
+
+    void Reset();
 
     ctp::ColumnarBatch ReadNextBatch();
 
 private:
-    ctp::Column ReadStrColumn(size_t& pos, uint64_t row_num,
-                              const kio::ColumnChunkMeta& chunk_meta,
-                              const std::string& batch);
-    ctp::Column ReadNumColumn(size_t& pos, uint64_t row_num, 
-                              const kio::ColumnChunkMeta& chunk_meta,
-                              const std::string& batch);
+    void ReadSchemaMeta();
 
     std::ifstream kio_file_;
-    std::string kio_name_;
-  
-    const Schema& schema_;
+    std::streampos batches_start_pos_ = 0;
+    Schema schema_;
 
 };

@@ -7,8 +7,11 @@ add_library(kio_core STATIC
         kio_work/kio_db.cpp
         kio_work/kio_db_reader.cpp
         kio_work/kio_db_writer.cpp
+        kio_work/kio_serialization.cpp
 
         schema.cpp
+        columnar_batch.cpp
+        column_operations.cpp
 
 )
 

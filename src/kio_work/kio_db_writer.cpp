@@ -4,59 +4,14 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
-#include <variant>
-#include <vector>
 
+#include "column_operations.h"
+#include "columnar_batch.h"
 #include "columnar_types.h"
+#include "kio_work/binary_io.h"
+#include "kio_work/kio_format.h"
+#include "kio_work/kio_serialization.h"
 #include "schema.h"
-
-namespace {
-auto MakeColumnChunkMeta(Schema::Types type, uint64_t size) {
-    kio::ColumnChunkMeta chunk_meta{};
-    chunk_meta.type = static_cast<uint8_t>(type);
-    chunk_meta.size = size;
-    return chunk_meta;
-}
-
-void WriteColumnChunkMeta(std::ofstream& kio_file, const kio::ColumnChunkMeta& chunk_meta) {
-    kio_file.write(reinterpret_cast<const char*>(&chunk_meta), sizeof(chunk_meta));
-}
-
-std::vector<uint64_t> GetStringSizes(const std::vector<std::string>& strings) {
-    std::vector<uint64_t> sizes;
-    sizes.reserve(strings.size());
-    for (const auto& str : strings) {
-        sizes.emplace_back(str.size());
-    }
-    return sizes;
-}
-    
-size_t CountWrittenBatchSize(const ctp::ColumnarBatch& batch) {
-    size_t result = 0;
-    for (size_t i = 0; i < batch.size(); i++) {
-        result += sizeof(kio::ColumnChunkMeta);
-
-        std::visit([&result](const auto& vec){
-            using T = std::decay_t<decltype(vec)>;
-            using Elem = T::value_type;
-
-            if constexpr (std::is_same_v<Elem, std::string>) {
-                std::vector<uint64_t> str_sizes = GetStringSizes(vec);
-                for (size_t j = 0; j < str_sizes.size(); j++) {
-                    result += sizeof(uint64_t) + str_sizes[j];
-                }
-            } else if constexpr (std::is_same_v<Elem, int64_t>) {
-                result += sizeof(int64_t) * vec.size();
-            } else {
-                throw std::runtime_error(
-                            "Unsupported column type in batch export");
-            }
-        }, batch[i]);
-    }
-
-    return result;
-}
-} // namespace
 
 KioDbWriter::KioDbWriter(const std::string& output_filename, const Schema& schema)
     : kio_name_(output_filename), schema_(schema) {
@@ -65,69 +20,54 @@ KioDbWriter::KioDbWriter(const std::string& output_filename, const Schema& schem
     if (!kio_file_.is_open()) {
         throw std::runtime_error("Failed to open file: " + kio_name_);
     }
+
+    WriteSchemaMeta();
+}
+
+void KioDbWriter::WriteSchemaMeta() {
+    uint64_t column_count = static_cast<uint64_t>(schema_.GetColumnCount());
+    bio::WritePod(kio_file_, column_count, "schema column count");
+
+    for (uint64_t i = 0; i < column_count; i++) {
+        const std::string& column_name = schema_.SearchNameByIndex(i);
+        uint64_t name_size = static_cast<uint64_t>(column_name.size());
+        uint8_t type = static_cast<uint8_t>(schema_.SearchTypeByIndex(i));
+
+        bio::WritePod(kio_file_, name_size, "column name size");
+        bio::WriteBytes(kio_file_, column_name.data(), name_size,
+                        "column name");
+        bio::WritePod(kio_file_, type, "column type");
+    }
 }
 
 void KioDbWriter::WriteBatchMeta(const ctp::ColumnarBatch& batch) {
     if (batch.empty()) {
         return;
-    } 
-    uint64_t batch_id = cur_batch_++;
-    uint64_t row_num = std::visit([](const auto& vec) { return vec.size();}, batch[0]);
-    uint64_t col_num = batch.size();
-    uint64_t batch_start_offset = static_cast<uint64_t>(kio_file_.tellp()) 
-                                  + sizeof(uint64_t) * 5;  // 5 metadata fields
-    uint64_t batch_size = CountWrittenBatchSize(batch);
-
-    kio_file_.write(reinterpret_cast<const char*>(&batch_id), sizeof(batch_id));
-    kio_file_.write(reinterpret_cast<const char*>(&row_num), sizeof(row_num));
-    kio_file_.write(reinterpret_cast<const char*>(&col_num), sizeof(col_num));
-    kio_file_.write(reinterpret_cast<const char*>(&batch_start_offset), sizeof(batch_start_offset));
-    kio_file_.write(reinterpret_cast<const char*>(&batch_size),sizeof(batch_size));
-
-    if (!kio_file_.good()) {
-        throw std::runtime_error("Failed to write batch metadata");
     }
+    std::streampos batch_meta_pos = kio_file_.tellp();
+    if (batch_meta_pos == std::streampos(-1)) {
+        throw std::runtime_error("Failed to get batch metadata position");
+    }
+
+    kio::BatchMeta batch_meta{};
+    batch_meta.batch_id = cur_batch_++;
+    batch_meta.row_num = ctp::GetColumnRowCount(batch[0]);
+    batch_meta.col_num = batch.size();
+    batch_meta.batch_start_offset =
+        static_cast<uint64_t>(batch_meta_pos) + sizeof(kio::BatchMeta);
+    batch_meta.batch_size = kio::GetBatchPayloadSize(batch);
+
+    bio::WritePod(kio_file_, batch_meta, "batch metadata");
 }
 
 void KioDbWriter::WriteColumns(const ctp::ColumnarBatch& batch) {
-    for (size_t i = 0; i < batch.size(); i++) {
-        std::visit([this](const auto& vec) {
-        WriteVectorToFile(vec);
-        }, batch[i]);
-    }
-}
+    for (size_t col_idx = 0; col_idx < batch.size(); ++col_idx) {
+        const auto& column = batch[col_idx];
+        Schema::Types col_type = schema_.SearchTypeByIndex(col_idx);
 
-template<typename T>
-void KioDbWriter::WriteVectorToFile(const std::vector<T>& nums) {
-    static_assert(std::is_arithmetic_v<T>, "Only numeric vectors are supported");
-
-    kio::ColumnChunkMeta chunk_meta = MakeColumnChunkMeta(Schema::INT64, nums.size() * sizeof(T));
-    WriteColumnChunkMeta(kio_file_, chunk_meta);
-    kio_file_.write(reinterpret_cast<const char*>(nums.data()), chunk_meta.size);
-
-    if (!kio_file_.good()) {
-        throw std::runtime_error("Failed to write numeric column");
-    }
-}
-
-void KioDbWriter::WriteVectorToFile(const std::vector<std::string>& strings) {
-    std::vector<uint64_t> str_sizes = GetStringSizes(strings);
-    uint64_t size = 0;
-    for (const auto& sz : str_sizes) {
-        size += sz;
-    }
-
-    kio::ColumnChunkMeta chunk_meta = MakeColumnChunkMeta(Schema::STRING, size);
-    WriteColumnChunkMeta(kio_file_, chunk_meta);
-    kio_file_.write(reinterpret_cast<const char*>(str_sizes.data()),
-                               sizeof(uint64_t) * str_sizes.size());
-
-    for (const auto& str : strings) {
-        kio_file_.write(str.data(), str.size());
-    }
-
-    if (!kio_file_.good()) {
-        throw std::runtime_error("Failed to write string column");
+        auto [meta, payload] = kio::SerializeColumn(column, col_type);
+        bio::WritePod(kio_file_, meta, "column chunk metadata");
+        bio::WriteBytes(kio_file_, payload.data(), payload.size(), "column payload");
     }
 }
 
@@ -136,6 +76,7 @@ void KioDbWriter::WriteBatchToFile(const ctp::ColumnarBatch& batch) {
         return;
     }
 
+    ctp::ValidateColumnarBatch(batch, schema_);
     WriteBatchMeta(batch);
     WriteColumns(batch);
 }
