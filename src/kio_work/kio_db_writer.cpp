@@ -1,173 +1,141 @@
 #include "kio_work/kio_db_writer.h"
 
+#include <cstddef>
 #include <cstdint>
-#include <fstream>
-#include <iostream>
 #include <stdexcept>
 #include <string>
-#include <vector>
 #include <variant>
+#include <vector>
 
 #include "columnar_types.h"
 #include "schema.h"
 
+namespace {
+auto MakeColumnChunkMeta(Schema::Types type, uint64_t size) {
+    kio::ColumnChunkMeta chunk_meta{};
+    chunk_meta.type = static_cast<uint8_t>(type);
+    chunk_meta.size = size;
+    return chunk_meta;
+}
 
+void WriteColumnChunkMeta(std::ofstream& kio_file, const kio::ColumnChunkMeta& chunk_meta) {
+    kio_file.write(reinterpret_cast<const char*>(&chunk_meta), sizeof(chunk_meta));
+}
 
-KioDbWriter::KioDbWriter(const std::string &output_db_name)
-    : db_filename_(output_db_name) {
-    db_file_.open(db_filename_,
-                  std::ios::binary | std::ios::out | std::ios::trunc);
-    if (!db_file_.is_open()) {
-        throw std::runtime_error("Failed to open output DB file: " +
-                                 output_db_name);
+std::vector<uint64_t> GetStringSizes(const std::vector<std::string>& strings) {
+    std::vector<uint64_t> sizes;
+    sizes.reserve(strings.size());
+    for (const auto& str : strings) {
+        sizes.emplace_back(str.size());
+    }
+    return sizes;
+}
+    
+size_t CountWrittenBatchSize(const ctp::ColumnarBatch& batch) {
+    size_t result = 0;
+    for (size_t i = 0; i < batch.size(); i++) {
+        result += sizeof(kio::ColumnChunkMeta);
+
+        std::visit([&result](const auto& vec){
+            using T = std::decay_t<decltype(vec)>;
+            using Elem = T::value_type;
+
+            if constexpr (std::is_same_v<Elem, std::string>) {
+                std::vector<uint64_t> str_sizes = GetStringSizes(vec);
+                for (size_t j = 0; j < str_sizes.size(); j++) {
+                    result += sizeof(uint64_t) + str_sizes[j];
+                }
+            } else if constexpr (std::is_same_v<Elem, int64_t>) {
+                result += sizeof(int64_t) * vec.size();
+            } else {
+                throw std::runtime_error(
+                            "Unsupported column type in batch export");
+            }
+        }, batch[i]);
+    }
+
+    return result;
+}
+} // namespace
+
+KioDbWriter::KioDbWriter(const std::string& output_filename, const Schema& schema)
+    : kio_name_(output_filename), schema_(schema) {
+
+    kio_file_.open(kio_name_, std::ios::binary | std::ios::out);
+    if (!kio_file_.is_open()) {
+        throw std::runtime_error("Failed to open file: " + kio_name_);
     }
 }
 
+void KioDbWriter::WriteBatchMeta(const ctp::ColumnarBatch& batch) {
+    if (batch.empty()) {
+        return;
+    } 
+    uint64_t batch_id = cur_batch_++;
+    uint64_t row_num = std::visit([](const auto& vec) { return vec.size();}, batch[0]);
+    uint64_t col_num = batch.size();
+    uint64_t batch_start_offset = static_cast<uint64_t>(kio_file_.tellp()) 
+                                  + sizeof(uint64_t) * 5;  // 5 metadata fields
+    uint64_t batch_size = CountWrittenBatchSize(batch);
 
-KioDbWriter::~KioDbWriter() {
-    if (!is_finished_ && db_file_.is_open()) {
-        try {
-            Finish();
-        } catch (const std::exception &e) {
-            std::cerr << "Error in KioDbWriter destructor: " << e.what()
-                    << std::endl;
-        }
+    kio_file_.write(reinterpret_cast<const char*>(&batch_id), sizeof(batch_id));
+    kio_file_.write(reinterpret_cast<const char*>(&row_num), sizeof(row_num));
+    kio_file_.write(reinterpret_cast<const char*>(&col_num), sizeof(col_num));
+    kio_file_.write(reinterpret_cast<const char*>(&batch_start_offset), sizeof(batch_start_offset));
+    kio_file_.write(reinterpret_cast<const char*>(&batch_size),sizeof(batch_size));
+
+    if (!kio_file_.good()) {
+        throw std::runtime_error("Failed to write batch metadata");
     }
 }
 
+void KioDbWriter::WriteColumns(const ctp::ColumnarBatch& batch) {
+    for (size_t i = 0; i < batch.size(); i++) {
+        std::visit([this](const auto& vec) {
+        WriteVectorToFile(vec);
+        }, batch[i]);
+    }
+}
 
-void KioDbWriter::WriteBatch(const ctp::ColumnarBatch &batch, const Schema &schema) {
+template<typename T>
+void KioDbWriter::WriteVectorToFile(const std::vector<T>& nums) {
+    static_assert(std::is_arithmetic_v<T>, "Only numeric vectors are supported");
+
+    kio::ColumnChunkMeta chunk_meta = MakeColumnChunkMeta(Schema::INT64, nums.size() * sizeof(T));
+    WriteColumnChunkMeta(kio_file_, chunk_meta);
+    kio_file_.write(reinterpret_cast<const char*>(nums.data()), chunk_meta.size);
+
+    if (!kio_file_.good()) {
+        throw std::runtime_error("Failed to write numeric column");
+    }
+}
+
+void KioDbWriter::WriteVectorToFile(const std::vector<std::string>& strings) {
+    std::vector<uint64_t> str_sizes = GetStringSizes(strings);
+    uint64_t size = 0;
+    for (const auto& sz : str_sizes) {
+        size += sz;
+    }
+
+    kio::ColumnChunkMeta chunk_meta = MakeColumnChunkMeta(Schema::STRING, size);
+    WriteColumnChunkMeta(kio_file_, chunk_meta);
+    kio_file_.write(reinterpret_cast<const char*>(str_sizes.data()),
+                               sizeof(uint64_t) * str_sizes.size());
+
+    for (const auto& str : strings) {
+        kio_file_.write(str.data(), str.size());
+    }
+
+    if (!kio_file_.good()) {
+        throw std::runtime_error("Failed to write string column");
+    }
+}
+
+void KioDbWriter::WriteBatchToFile(const ctp::ColumnarBatch& batch) {
     if (batch.empty()) {
         return;
     }
 
-    kio::BatchMeta meta;
-    meta.batch_id = next_batch_id_++;
-    meta.columns_info.reserve(batch.size());
-
-    for (size_t col_idx = 0; col_idx < batch.size(); ++col_idx) {
-        kio::ColumnChunkMeta col_meta{};
-        col_meta.type =
-                static_cast<std::uint8_t>(schema.SearchTypeByIndex(col_idx));
-
-        const auto off = db_file_.tellp();
-        if (off == std::ofstream::pos_type(-1)) {
-            throw std::runtime_error(
-                "tellp() failed before writing column");
-        }
-        col_meta.offset = static_cast<std::uint64_t>(off);
-
-        const auto &column_variant = batch[col_idx];
-        std::visit(
-            [this, &col_meta](const auto &vec) {
-                WriteVectorToStream(vec, col_meta);
-            },
-            column_variant);
-
-        meta.columns_info.push_back(col_meta);
-    }
-
-    WriteBatchMetaBlock(meta);
-}
-
-
-void KioDbWriter::Finish() {
-    if (is_finished_) {
-        return;
-    }
-    db_file_.flush();
-    db_file_.close();
-    is_finished_ = true;
-}
-
-
-void KioDbWriter::WriteBatchMetaBlock(const kio::BatchMeta &meta) {
-    const auto meta_start = db_file_.tellp();
-    if (meta_start == std::ofstream::pos_type(-1)) {
-        throw std::runtime_error("tellp() failed at meta_start");
-    }
-
-    db_file_.write(reinterpret_cast<const char *>(&meta.batch_id),
-                   sizeof(meta.batch_id));
-
-    std::uint64_t col_count =
-            static_cast<std::uint64_t>(meta.columns_info.size());
-    db_file_.write(reinterpret_cast<const char *>(&col_count),
-                   sizeof(col_count));
-
-    for (const auto &col: meta.columns_info) {
-        db_file_.write(reinterpret_cast<const char *>(&col.type),
-                       sizeof(col.type));
-        db_file_.write(reinterpret_cast<const char *>(&col.offset),
-                       sizeof(col.offset));
-        db_file_.write(reinterpret_cast<const char *>(&col.size),
-                       sizeof(col.size));
-        db_file_.write(reinterpret_cast<const char *>(&col.count),
-                       sizeof(col.count));
-    }
-
-    const auto meta_end = db_file_.tellp();
-    if (meta_end == std::ofstream::pos_type(-1)) {
-        throw std::runtime_error("tellp() failed at meta_end");
-    }
-
-    const std::uint64_t meta_size =
-            static_cast<std::uint64_t>(meta_end - meta_start);
-
-    // [meta_size][magic] — чтобы ридер мог с конца найти BatchMeta block
-    db_file_.write(reinterpret_cast<const char *>(&meta_size),
-                   sizeof(meta_size));
-    db_file_.write(reinterpret_cast<const char *>(&kBatchMetaMagic),
-                   sizeof(kBatchMetaMagic));
-
-    if (!db_file_.good()) {
-        throw std::runtime_error("Failed while writing batch meta/trailer");
-    }
-}
-
-
-void KioDbWriter::WriteVectorToStream(const std::vector<std::int64_t> &vec,
-                                      kio::ColumnChunkMeta &meta) {
-    meta.count = static_cast<std::uint64_t>(vec.size());
-    const std::uint64_t bytes =
-            static_cast<std::uint64_t>(vec.size()) * sizeof(std::int64_t);
-
-    if (bytes > 0) {
-        db_file_.write(reinterpret_cast<const char *>(vec.data()),
-                       static_cast<std::streamsize>(bytes));
-    }
-    meta.size = bytes;
-
-    if (!db_file_.good()) {
-        throw std::runtime_error("Failed to write int64 column data");
-    }
-}
-
-
-void KioDbWriter::WriteVectorToStream(const std::vector<std::string> &vec,
-                             kio::ColumnChunkMeta &meta) {
-    meta.count = static_cast<std::uint64_t>(vec.size());
-    const auto start = db_file_.tellp();
-    if (start == std::ofstream::pos_type(-1)) {
-        throw std::runtime_error("tellp() failed at string start");
-    }
-
-    for (const auto &s : vec) {
-        std::uint32_t len = static_cast<std::uint32_t>(s.size());
-        db_file_.write(reinterpret_cast<const char *>(&len), sizeof(len));
-        if (len > 0) {
-            db_file_.write(s.data(), len);
-        }
-    }
-
-    const auto end = db_file_.tellp();
-    if (end == std::ofstream::pos_type(-1)) {
-        throw std::runtime_error("tellp() failed at string end");
-    }
-
-    meta.size = static_cast<std::uint64_t>(end - start);
-
-    if (!db_file_.good()) {
-        throw std::runtime_error("Failed to write string column data");
-    }
+    WriteBatchMeta(batch);
+    WriteColumns(batch);
 }

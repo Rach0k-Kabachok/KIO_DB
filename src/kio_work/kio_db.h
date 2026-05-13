@@ -4,16 +4,14 @@
 
 #include "csv_work/csv_formatter.h"
 #include "kio_work/kio_db_writer.h"
-#include "kio_work/kio_db_reader.h"
 #include "columnar_types.h"
 #include "schema.h"
 
 class KioDb {
-    CSVFormatter csv_formatter_;
-
     Schema schema_;
+    CSVFormatter csv_formatter_;
     KioDbWriter writer_;
-    KioDbReader reader_;
+
 
     ctp::ColumnarBatch batch_;
 
@@ -24,8 +22,8 @@ public:
     KioDb(const KioDb&) = delete;
     KioDb& operator=(const KioDb&) = delete;
 
-    KioDb(KioDb&&) = default;
-    KioDb& operator=(KioDb&&) = default;
+    KioDb(KioDb&&) = delete;
+    KioDb& operator=(KioDb&&) = delete;
 
     // функция для удобного тестирования чтения-записи
     void ProcessAllInput();
