@@ -1,13 +1,58 @@
 #include "csv_work/csv_exporter.h"
 
+#include <chrono>
+#include <iomanip>
 #include <string>
 #include <fstream>
-#include <vector>
-#include <variant>
+#include <sstream>
 #include <iostream>
 #include <stdexcept>
+#include <vector>
 
+#include "columnar_batch.h"
+#include "column_operations.h"
 #include "kio_work/kio_db_reader.h"
+
+namespace {
+void WriteEscapedString(std::ofstream& csv_file, const std::string& value) {
+    for (char ch : value) {
+        if (ch == '"') {
+            csv_file << "\"\"";
+        } else {
+            csv_file << ch;
+        }
+    }
+}
+
+std::string FormatDate(std::int32_t days) {
+    const std::chrono::sys_days date{std::chrono::days{days}};
+    const std::chrono::year_month_day ymd{date};
+
+    std::ostringstream result;
+    result << std::setfill('0') << std::setw(4)
+           << static_cast<int>(ymd.year()) << '-'
+           << std::setw(2) << static_cast<unsigned>(ymd.month()) << '-'
+           << std::setw(2) << static_cast<unsigned>(ymd.day());
+    return result.str();
+}
+
+std::string FormatTimestamp(std::int64_t seconds) {
+    const std::chrono::sys_seconds time{std::chrono::seconds{seconds}};
+    const auto date = std::chrono::floor<std::chrono::days>(time);
+    const std::chrono::year_month_day ymd{date};
+    const std::chrono::hh_mm_ss hms{time - date};
+
+    std::ostringstream result;
+    result << std::setfill('0') << std::setw(4)
+           << static_cast<int>(ymd.year()) << '-'
+           << std::setw(2) << static_cast<unsigned>(ymd.month()) << '-'
+           << std::setw(2) << static_cast<unsigned>(ymd.day()) << ' '
+           << std::setw(2) << hms.hours().count() << ':'
+           << std::setw(2) << hms.minutes().count() << ':'
+           << std::setw(2) << hms.seconds().count();
+    return result.str();
+}
+}  // namespace
 
 CsvExporter::CsvExporter(KioDbReader& reader, const std::string& csv_filename)
         : csv_name_(csv_filename), kio_reader_(reader) {
@@ -66,55 +111,57 @@ void CsvExporter::WriteBatchToStream(const ctp::ColumnarBatch &batch) {
         return;
     }
 
-    size_t num_rows =
-            std::visit([](const auto &v) { return v.size(); }, batch[0]);
-    size_t num_cols = batch.size();
+    const Schema& schema = kio_reader_.GetSchema();
+    ctp::ValidateColumnarBatch(batch, schema);
 
-    for (size_t col_idx = 0; col_idx < num_cols; ++col_idx) {
-        size_t col_size = std::visit([](const auto &v) { return v.size(); },
-                                     batch[col_idx]);
-        if (col_size != num_rows) {
-            throw std::runtime_error("Column " + std::to_string(col_idx) +
-                                     " has " + std::to_string(col_size) +
-                                     " rows, expected " +
-                                     std::to_string(num_rows));
-        }
-    }
+    size_t num_rows = ctp::GetColumnRowCount(batch[0]);
+    size_t num_cols = batch.size();
+    const auto& column_types = schema.GetIndexToType();
 
     for (size_t row_idx = 0; row_idx < num_rows; ++row_idx) {
         for (size_t col_idx = 0; col_idx < num_cols; ++col_idx) {
             csv_file_ << '\"';
-            const auto &column_variant = batch[col_idx];
-
-            std::visit(
-                [this, row_idx](const auto &vec) {
-                    using T = std::decay_t<decltype(vec)>;
-                    using Elem = T::value_type;
-
-                    if constexpr (std::is_same_v<Elem, std::string>) {
-                        const std::string &s = vec[row_idx];
-                        for (char ch: s) {
-                            if (ch == '"') {
-                                csv_file_ << "\"\"";
-                            } else {
-                                csv_file_ << ch;
-                            }
-                        }
-                    } else if constexpr (std::is_same_v<Elem, std::int64_t>) {
-                        csv_file_ << vec[row_idx];
-                    } else {
-                        throw std::runtime_error(
-                            "Unsupported column type in batch export");
-                    }
-                },
-                column_variant);
-
+            WriteColumnValue(batch[col_idx], row_idx, column_types[col_idx]);
             csv_file_ << '\"';
+            
             if (col_idx < num_cols - 1) {
                 csv_file_ << ',';
             }
         }
 
         csv_file_ << "\n";
+    }
+}
+
+void CsvExporter::WriteColumnValue(const ctp::Column& column, size_t row_idx, Schema::Types type) {
+    switch (type) {
+    case Schema::BIGINT:
+        csv_file_ << ctp::GetColumnData<int64_t>(column)[row_idx];
+        break;
+    case Schema::INTEGER:
+        csv_file_ << ctp::GetColumnData<int32_t>(column)[row_idx];
+        break;
+    case Schema::SMALLINT:
+        csv_file_ << ctp::GetColumnData<int16_t>(column)[row_idx];
+        break;
+    case Schema::TEXT:
+    case Schema::VARCHAR:
+        WriteEscapedString(csv_file_, ctp::GetColumnData<std::string>(column)[row_idx]);
+        break;
+    case Schema::CHAR: {
+        const char ch = ctp::GetColumnData<char>(column)[row_idx];
+        if (ch == '"') {
+            csv_file_ << "\"\"";
+        } else {
+            csv_file_ << ch;
+        }
+        break;
+    }
+    case Schema::TIMESTAMP:
+        WriteEscapedString(csv_file_, FormatTimestamp(ctp::GetColumnData<int64_t>(column)[row_idx]));
+        break;
+    case Schema::DATE:
+        WriteEscapedString(csv_file_, FormatDate(ctp::GetColumnData<int32_t>(column)[row_idx]));
+        break;
     }
 }

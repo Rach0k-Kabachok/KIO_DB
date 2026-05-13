@@ -3,7 +3,9 @@
 #include <string>
 #include <fstream>
 
+#include "columnar_types.h"
 #include "kio_work/kio_db_reader.h"
+#include "schema.h"
 
 class CsvExporter {
 public:
@@ -17,6 +19,7 @@ public:
 private:
     void WriteBatchToStream(const ctp::ColumnarBatch &batch);
     
+    void WriteColumnValue(const ctp::Column& column, size_t row_idx, Schema::Types type);
     
     std::ofstream csv_file_;
     std::string csv_name_;

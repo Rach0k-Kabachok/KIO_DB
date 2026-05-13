@@ -46,8 +46,6 @@ TEST(ReadWrite, JustWorks) {
     const std::string path_out_csv =
         ReadWriteTestOutputPath("kio_db_read_write_test.csv").string();
 
-    Schema schema = LoadReadWriteTestSchema(path_schema);
-
     std::error_code ec;
     std::filesystem::remove(path_db, ec);
     std::filesystem::remove(path_out_csv, ec);
@@ -61,7 +59,7 @@ TEST(ReadWrite, JustWorks) {
     ASSERT_GT(std::filesystem::file_size(path_db), 0u);
 
     {
-        KioDbReader reader(path_db, schema);
+        KioDbReader reader(path_db);
         ASSERT_NO_THROW({
             CsvExporter exporter(reader, path_out_csv);
             exporter.Export();
@@ -103,7 +101,7 @@ TEST(ReadWrite, RoundTripBatchAndEOF) {
         ASSERT_NO_THROW(writer.WriteBatchToFile(expected));
     }
 
-    KioDbReader reader(path_db, schema);
+    KioDbReader reader(path_db);
     EXPECT_EQ(reader.ReadNextBatch(), expected);
     EXPECT_TRUE(reader.ReadNextBatch().empty());
 
@@ -122,8 +120,7 @@ TEST(ReadWrite, EmptyFileReturnsEmptyBatch) {
         ASSERT_TRUE(out.is_open());
     }
 
-    Schema schema({{"str", "string"}, {"integers", "int64"}});
-    KioDbReader reader(path_db, schema);
+    KioDbReader reader(path_db);
     EXPECT_TRUE(reader.ReadNextBatch().empty());
 
     std::filesystem::remove(path_db, ec);

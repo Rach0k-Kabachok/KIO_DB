@@ -11,6 +11,8 @@ public:
     CSVFormatter(const std::string &data_name, const Schema &schema);
 
     ctp::ColumnarBatch MakeColumnarBatch();
+
+    static size_t CountTime(std::string time);
     
 private:
     CSVBatchReader batch_reader_;

@@ -40,8 +40,8 @@ TEST(BatchFormatterTest, MakeFileColumnar) {
 
     std::unordered_map<std::string, size_t> expected_names_to_index = {
         {"str", 0}, {"integers", 1}};
-    std::vector<Schema::Types> expected_index_to_types{Schema::STRING,
-                                                       Schema::INT64};
+    std::vector<Schema::Types> expected_index_to_types{Schema::TEXT,
+                                                       Schema::BIGINT};
     std::vector<std::string> expected_index_to_names{"str", "integers"};
 
     EXPECT_EQ(schema.GetIndexToName(), expected_index_to_names);
