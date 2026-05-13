@@ -6,23 +6,14 @@
 #include <cstdint>
 
 namespace ctp {
+using Date = std::int32_t;
+using Timestamp = std::int64_t;
+using Varchar = std::string;
+
 using ParsedRow = std::vector<std::string>;
 using ParsedBatch = std::vector<std::vector<std::string> >;
-using Column = std::variant<std::vector<int64_t>, std::vector<std::string> >;
+using Column = std::variant<std::vector<int64_t>, std::vector<int32_t>, std::vector<int16_t>, 
+                            std::vector<std::string>,
+                            std::vector<char>, std::vector<unsigned char>>;
 using ColumnarBatch = std::vector<Column>;
 }  // namespace ctp
-
-namespace kio {
-struct ColumnChunkMeta {
-    uint8_t type;
-    uint64_t size;  // Schema::Types (INT64 = 0, STRING = 1)
-};
-
-struct BatchMeta {
-    uint64_t batch_id;
-    uint64_t row_num;
-    uint64_t col_num;
-    uint64_t batch_start_offset;
-    uint64_t batch_size;
-};
-}  // namespace kio
