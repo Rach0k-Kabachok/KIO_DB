@@ -1,14 +1,16 @@
 #pragma once
 
 #include <string>
-#include <sstream>
 
 #include "columnar_types.h"
 
 
 class CSVRowParser {
     static constexpr char kSeparator = ',';
-    std::istringstream buffer_stream_;
+    std::string buffer_;
+    size_t cur_pos_ = 0;
+
+    std::string GetLine();
 
 public:
     explicit CSVRowParser(std::string &&buffer);

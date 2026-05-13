@@ -1,17 +1,24 @@
 #pragma once
 
 #include <string>
+#include <fstream>
 
 #include "kio_work/kio_db_reader.h"
 
 class CsvExporter {
 public:
-    static void Export(KioDbReader &reader, const std::string &out_filename);
+    CsvExporter(KioDbReader& reader, const std::string& csv_filename);
+    
 
-    static void ExportBatch(KioDbReader &reader, size_t batch_index,
-                            const std::string &out_filename);
+    void Export();
+
+    void ExportBatch(size_t batch_index);
 
 private:
-    static void WriteBatchToStream(const ctp::ColumnarBatch &batch,
-                                   std::ostream &out);
+    void WriteBatchToStream(const ctp::ColumnarBatch &batch);
+    
+    
+    std::ofstream csv_file_;
+    std::string csv_name_;
+    KioDbReader& kio_reader_;
 };

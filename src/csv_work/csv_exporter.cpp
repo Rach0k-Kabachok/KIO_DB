@@ -9,80 +9,59 @@
 
 #include "kio_work/kio_db_reader.h"
 
-
-void CsvExporter::Export(KioDbReader &reader, const std::string &out_filename) {
-    std::ofstream out(out_filename);
-    if (!out.is_open()) {
-        throw std::runtime_error("Cannot open output CSV file: " +
-                                 out_filename);
+CsvExporter::CsvExporter(KioDbReader& reader, const std::string& csv_filename)
+        : csv_name_(csv_filename), kio_reader_(reader) {
+    csv_file_.open(csv_name_, std::ios::out);
+    if (!csv_file_.is_open()) {
+        throw std::runtime_error("Cannot open CSV file for writing: " + csv_name_);
     }
+}
 
-    size_t batch_count = reader.GetBatchCount();
+void CsvExporter::Export() {
+    size_t batch_count = 0;
+    while (true) {
+        ctp::ColumnarBatch batch = kio_reader_.ReadNextBatch();
+        if (batch.empty()) {
+            break;
+        }
+        WriteBatchToStream(batch);
+        batch_count++;
+    }
 
     if (batch_count == 0) {
         std::cerr << "No batches to export" << std::endl;
         return;
     }
 
-    for (size_t i = 0; i < batch_count; ++i) {
-        try {
-            auto batch = reader.ReadBatch(i);
-            if (batch.empty()) {
-                std::cerr << "Warning: Batch " << i << " is empty, skipping"
-                        << std::endl;
-                continue;
-            }
-
-            WriteBatchToStream(batch, out);
-        } catch (const std::exception &e) {
-            throw std::runtime_error("Error exporting batch " +
-                                     std::to_string(i) + ": " + e.what());
-        }
-    }
-
-    out.close();
-    if (!out.good()) {
-        throw std::runtime_error("Error writing to output CSV file");
-    }
-
     std::cout << "Successfully exported " << batch_count << " batches to "
-            << out_filename << std::endl;
+              << csv_name_ << std::endl;
 }
 
 
-void CsvExporter::ExportBatch(KioDbReader &reader, size_t batch_index,
-                              const std::string &out_filename) {
-    std::ofstream out(out_filename);
-    if (!out.is_open()) {
-        throw std::runtime_error("Cannot open output CSV file: " +
-                                 out_filename);
-    }
-
+void CsvExporter::ExportBatch(size_t batch_index) {
     try {
-        auto batch = reader.ReadBatch(batch_index);
-        if (batch.empty()) {
-            throw std::runtime_error("Batch is empty");
+        for (size_t i = 0; i <= batch_index; i++) {
+            ctp::ColumnarBatch batch = kio_reader_.ReadNextBatch();
+            if (batch.empty()) {
+                throw std::runtime_error("Batch is empty");
+            }
+            if (i == batch_index) {
+                WriteBatchToStream(batch);
+                break;
+            }
         }
-
-        WriteBatchToStream(batch, out);
     } catch (const std::exception &e) {
         throw std::runtime_error("Error exporting batch " +
                                  std::to_string(batch_index) + ": " +
                                  e.what());
     }
 
-    out.close();
-    if (!out.good()) {
-        throw std::runtime_error("Error writing to output CSV file");
-    }
-
     std::cout << "Successfully exported batch " << batch_index << " to "
-            << out_filename << std::endl;
+            << csv_name_ << std::endl;
 }
 
 
-void CsvExporter::WriteBatchToStream(const ctp::ColumnarBatch &batch,
-                                     std::ostream &out) {
+void CsvExporter::WriteBatchToStream(const ctp::ColumnarBatch &batch) {
     if (batch.empty()) {
         return;
     }
@@ -104,11 +83,11 @@ void CsvExporter::WriteBatchToStream(const ctp::ColumnarBatch &batch,
 
     for (size_t row_idx = 0; row_idx < num_rows; ++row_idx) {
         for (size_t col_idx = 0; col_idx < num_cols; ++col_idx) {
-            out << "\"";
+            csv_file_ << '\"';
             const auto &column_variant = batch[col_idx];
 
             std::visit(
-                [&out, row_idx](const auto &vec) {
+                [this, row_idx](const auto &vec) {
                     using T = std::decay_t<decltype(vec)>;
                     using Elem = T::value_type;
 
@@ -116,23 +95,26 @@ void CsvExporter::WriteBatchToStream(const ctp::ColumnarBatch &batch,
                         const std::string &s = vec[row_idx];
                         for (char ch: s) {
                             if (ch == '"') {
-                                out << "\"\"";
+                                csv_file_ << "\"\"";
                             } else {
-                                out << ch;
+                                csv_file_ << ch;
                             }
                         }
+                    } else if constexpr (std::is_same_v<Elem, std::int64_t>) {
+                        csv_file_ << vec[row_idx];
                     } else {
-                        out << vec[row_idx];
+                        throw std::runtime_error(
+                            "Unsupported column type in batch export");
                     }
                 },
                 column_variant);
 
-            out << "\"";
+            csv_file_ << '\"';
             if (col_idx < num_cols - 1) {
-                out << ",";
+                csv_file_ << ',';
             }
         }
 
-        out << "\n";
+        csv_file_ << "\n";
     }
 }

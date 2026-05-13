@@ -25,6 +25,18 @@ TEST(RowParserTest, Comma) {
     EXPECT_EQ(parser.ParseNext(), expected);
 }
 
+TEST(RowParserTest, NewLineInQuotedField) {
+    CSVRowParser parser(
+        "\"first line\nsecond line\",value\n"
+        "next,row\n");
+
+    std::vector<std::string> expected{"first line\nsecond line", "value"};
+    EXPECT_EQ(parser.ParseNext(), expected);
+
+    expected = {"next", "row"};
+    EXPECT_EQ(parser.ParseNext(), expected);
+}
+
 TEST(RowParserTest, EmptyField) {
     CSVRowParser parser(
         "a,,\n"
@@ -35,6 +47,24 @@ TEST(RowParserTest, EmptyField) {
 
     expected = {"a", "b", ""};
     EXPECT_EQ(parser.ParseNext(), expected);
+}
+
+TEST(RowParserTest, EmptyLineIsARow) {
+    CSVRowParser parser("\na,b\n");
+
+    std::vector<std::string> expected{""};
+    EXPECT_EQ(parser.ParseNext(), expected);
+
+    expected = {"a", "b"};
+    EXPECT_EQ(parser.ParseNext(), expected);
+
+    expected.clear();
+    EXPECT_EQ(parser.ParseNext(), expected);
+}
+
+TEST(RowParserTest, UnclosedQuoteAtEndThrows) {
+    CSVRowParser parser("\"");
+    EXPECT_THROW(parser.ParseNext(), std::invalid_argument);
 }
 
 TEST(RowParserTest, SeveralRows) {

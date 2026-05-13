@@ -8,13 +8,8 @@
 #include "csv_work/csv_batch_reader.h"
 #include "schema.h"
 
-CSVFormatter::CSVFormatter(const std::string &data_name, const std::string &schema_name)
-        : batch_reader_(data_name) {
-    CSVBatchReader schema_reader(schema_name);
-    ctp::ParsedBatch batch;
-    while (!(batch = schema_reader.ParseNextBatch()).empty()) {
-        ImplSchema(batch);
-    }
+CSVFormatter::CSVFormatter(const std::string &data_name, const Schema &schema)
+        : batch_reader_(data_name), schema_(schema) {
 }
 
 ctp::ColumnarBatch CSVFormatter::MakeColumnarBatch() {
@@ -31,9 +26,10 @@ ctp::ColumnarBatch CSVFormatter::MakeColumnarBatch() {
     result.reserve(num_cols);
 
     for (size_t col_idx = 0; col_idx < num_cols; ++col_idx) {
-        auto type = SearchTypeByIndex(col_idx);
+        auto type = schema_.SearchTypeByIndex(col_idx);
 
-        if (type == INT64) {
+        switch (type) {
+        case Schema::INT64: {
             std::vector<int64_t> int_vec;
             int_vec.reserve(num_rows);
 
@@ -41,6 +37,8 @@ ctp::ColumnarBatch CSVFormatter::MakeColumnarBatch() {
                 try {
                     const std::string &num = batch[row_idx][col_idx];
                     if (num.empty()) {
+                        std::cerr << "Warning: Empty value at row " << row_idx << " col "
+                                  << col_idx << ", treating as 0\n";
                         int_vec.push_back(0);
                     } else {
                         int_vec.push_back(std::stoll(num));
@@ -52,7 +50,9 @@ ctp::ColumnarBatch CSVFormatter::MakeColumnarBatch() {
                 }
             }
             result.emplace_back(std::move(int_vec));
-        } else if (type == STRING) {
+            break;
+        }
+        case Schema::STRING: {
             std::vector<std::string> str_vec;
             str_vec.reserve(num_rows);
 
@@ -60,6 +60,8 @@ ctp::ColumnarBatch CSVFormatter::MakeColumnarBatch() {
                 str_vec.push_back(batch[row_idx][col_idx]);
             }
             result.emplace_back(std::move(str_vec));
+            break;
+        }
         }
     }
 
