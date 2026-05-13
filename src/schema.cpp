@@ -6,6 +6,12 @@
 #include <unordered_map>
 
 
+Schema::Schema(
+        const std::vector<std::vector<std::string>>& column_names_types) {
+    ImplSchema(column_names_types);
+}
+
+
 void Schema::ImplSchema(
         const std::vector<std::vector<std::string>>& column_names_types) {
     if (column_names_types.empty()) {
@@ -47,17 +53,17 @@ void Schema::ImplSchema(
 }
 
 
-const std::unordered_map<std::string, size_t>& Schema::GetNameToIndex() {
+const std::unordered_map<std::string, size_t>& Schema::GetNameToIndex() const {
     return names_to_index_;
 }
 
 
-const std::vector<Schema::Types>& Schema::GetIndexToType() {
+const std::vector<Schema::Types>& Schema::GetIndexToType() const {
     return index_to_types_;
 }
 
 
-const std::vector<std::string>& Schema::GetIndexToName() {
+const std::vector<std::string>& Schema::GetIndexToName() const {
     return index_to_names_;
 }
 

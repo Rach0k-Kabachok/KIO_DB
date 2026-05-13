@@ -10,19 +10,24 @@ struct Schema {
         STRING = 1,
     };
 
+    Schema() = default;
+
+    explicit Schema(
+        const std::vector<std::vector<std::string>>& column_names_types);
+
     void ImplSchema(
         const std::vector<std::vector<std::string>>& column_names_types);
 
-    const std::unordered_map<std::string, size_t>& GetNameToIndex();
+    const std::unordered_map<std::string, size_t>& GetNameToIndex() const;
 
-    const std::vector<Types>& GetIndexToType();
+    const std::vector<Types>& GetIndexToType() const;
 
-    const std::vector<std::string>& GetIndexToName();
+    const std::vector<std::string>& GetIndexToName() const;
 
     size_t GetIndex(const std::string& name) const;
 
     Types SearchTypeByIndex(size_t index) const;
-
+    
     const std::string& SearchNameByIndex(size_t index) const;
 
     const Schema& GetSchema() const;

@@ -14,14 +14,15 @@ using ColumnarBatch = std::vector<Column>;
 
 namespace kio {
 struct ColumnChunkMeta {
-    uint8_t type;  // Schema::Types (INT64 = 0, STRING = 1)
-    uint64_t offset;
-    uint64_t size;
-    uint64_t count;
+    uint8_t type;
+    uint64_t size;  // Schema::Types (INT64 = 0, STRING = 1)
 };
 
 struct BatchMeta {
     uint64_t batch_id;
-    std::vector<ColumnChunkMeta> columns_info;
+    uint64_t row_num;
+    uint64_t col_num;
+    uint64_t batch_start_offset;
+    uint64_t batch_size;
 };
 }  // namespace kio
