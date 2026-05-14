@@ -4,7 +4,7 @@
 #include <fstream>
 
 #include "columnar_types.h"
-#include "kio_work/kio_db_reader.h"
+#include "transport/kio/kio_db_reader.h"
 #include "schema.h"
 
 class CsvExporter {

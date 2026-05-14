@@ -1,16 +1,17 @@
-#include "kio_work/kio_db_writer.h"
+#include "transport/kio/kio_db_writer.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "column_operations.h"
 #include "columnar_batch.h"
 #include "columnar_types.h"
-#include "kio_work/binary_io.h"
-#include "kio_work/kio_format.h"
-#include "kio_work/kio_serialization.h"
+#include "transport/kio/binary_io.h"
+#include "transport/kio/kio_format.h"
+#include "transport/kio/kio_serialization.h"
 #include "schema.h"
 
 KioDbWriter::KioDbWriter(const std::string& output_filename, const Schema& schema)
@@ -25,7 +26,7 @@ KioDbWriter::KioDbWriter(const std::string& output_filename, const Schema& schem
 }
 
 void KioDbWriter::WriteSchemaMeta() {
-    uint64_t column_count = static_cast<uint64_t>(schema_.GetColumnCount());
+    uint64_t column_count = schema_.GetColumnCount();
     bio::WritePod(kio_file_, column_count, "schema column count");
 
     for (uint64_t i = 0; i < column_count; i++) {
@@ -61,11 +62,34 @@ void KioDbWriter::WriteBatchMeta(const ctp::ColumnarBatch& batch) {
 }
 
 void KioDbWriter::WriteColumns(const ctp::ColumnarBatch& batch) {
+    std::vector<uint64_t> column_offsets;
+    std::vector<kio::ColumnChunkMeta> column_metas;
+    std::vector<std::vector<char>> column_payloads;
+    column_offsets.reserve(batch.size());
+    column_metas.reserve(batch.size());
+    column_payloads.reserve(batch.size());
+
+    uint64_t column_offset =
+        sizeof(uint64_t) * static_cast<uint64_t>(batch.size());
+
     for (size_t col_idx = 0; col_idx < batch.size(); ++col_idx) {
         const auto& column = batch[col_idx];
         Schema::Types col_type = schema_.SearchTypeByIndex(col_idx);
 
         auto [meta, payload] = kio::SerializeColumn(column, col_type);
+        column_offsets.push_back(column_offset);
+        column_offset += sizeof(kio::ColumnChunkMeta) + meta.size;
+        column_metas.push_back(meta);
+        column_payloads.push_back(std::move(payload));
+    }
+
+    for (uint64_t offset : column_offsets) {
+        bio::WritePod(kio_file_, offset, "column offset");
+    }
+
+    for (size_t col_idx = 0; col_idx < column_metas.size(); ++col_idx) {
+        const auto& meta = column_metas[col_idx];
+        const auto& payload = column_payloads[col_idx];
         bio::WritePod(kio_file_, meta, "column chunk metadata");
         bio::WriteBytes(kio_file_, payload.data(), payload.size(), "column payload");
     }

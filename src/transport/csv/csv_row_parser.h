@@ -10,8 +10,6 @@ class CSVRowParser {
     std::string buffer_;
     size_t cur_pos_ = 0;
 
-    std::string GetLine();
-
 public:
     explicit CSVRowParser(std::string &&buffer);
 

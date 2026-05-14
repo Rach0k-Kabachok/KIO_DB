@@ -8,23 +8,27 @@
 
 struct Schema {
     enum Types {
-        BIGINT = 0, // 64 bit integer
-        INTEGER = 1, // 32 bit integer
-        SMALLINT = 2, // 16 bit integer
-        TEXT = 3, // variable-length string
-        VARCHAR = 4, // variable-length string with maximum length
-        CHAR = 5, // fixed-length string
-        TIMESTAMP = 6, // date and time
-        DATE = 7 // date only
+        BIGINT = 0, // 64-битное целое число
+        INTEGER = 1, // 32-битное целое число
+        SMALLINT = 2, // 16-битное целое число
+        TEXT = 3, // строка переменной длины
+        VARCHAR = 4, // строка переменной длины с ограничением размера
+        CHAR = 5, // строка фиксированной длины
+        TIMESTAMP = 6, // дата и время
+        DATE = 7 // только дата
     };
 
     Schema() = default;
 
     explicit Schema(
         const std::vector<std::vector<std::string>>& column_names_types);
+    
+    explicit Schema (const std::string& schema_file);
 
     void ImplSchema(
         const std::vector<std::vector<std::string>>& column_names_types);
+    
+    void LoadSchema(const std::string& schema_file);    
 
     void Clear();
 

@@ -7,18 +7,18 @@
 #include <vector>
 
 #include "columnar_types.h"
-#include "kio_work/kio_format.h"
+#include "transport/kio/kio_format.h"
 #include "schema.h"
 
 namespace kio {
 
-// Получить размер payload для одной колонки
+// Получить размер полезной нагрузки для одной колонки
 size_t GetColumnPayloadSize(const ctp::Column& column);
 
-// Получить полный размер batch с метаданными колонок
+// Получить полный размер пакета с метаданными колонок
 size_t GetBatchPayloadSize(const ctp::ColumnarBatch& batch);
 
-// Преобразовать column в буфер для записи в файл
+// Преобразовать колонку в буфер для записи в файл
 // Возвращает пару: метаданные и буфер данных
 std::pair<ColumnChunkMeta, std::vector<char>> SerializeColumn(const ctp::Column& column, Schema::Types type);
 

@@ -11,7 +11,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-parameter -Wno-unused-functi
 
 add_subdirectory(src)
 
-# -------------------- tests --------------------
+# -------------------- тесты --------------------
 include(FetchContent)
 
 FetchContent_Declare(

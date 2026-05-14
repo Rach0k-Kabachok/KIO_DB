@@ -7,7 +7,7 @@
 #include "columnar_types.h"
 
 class CSVBatchReader {
-    static constexpr size_t kBatchSizeBytes = 1 << 20;  // 1 MB
+    static constexpr size_t kBatchSizeBytes = 64 * (1 << 20);  // 64 МБ
     std::ifstream csv_stream_;
     bool eof_reached_ = false;
     std::string pending_buffer_;
@@ -22,6 +22,8 @@ public:
     CSVBatchReader &operator=(CSVBatchReader &&) = default;
 
     ctp::ParsedBatch ParseNextBatch();
+
+    std::string ReadNextBuffer();
 
     bool IsEOF() const;
 

@@ -1,4 +1,4 @@
-#include "kio_work/kio_db_reader.h"
+#include "transport/kio/kio_db_reader.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -9,8 +9,8 @@
 
 #include "columnar_batch.h"
 #include "columnar_types.h"
-#include "kio_work/binary_io.h"
-#include "kio_work/kio_format.h"
+#include "transport/kio/binary_io.h"
+#include "transport/kio/kio_format.h"
 #include "schema.h"
 
 namespace {
@@ -38,7 +38,7 @@ ctp::Column ReadStringColumn(size_t& pos, uint64_t row_num,
         result.emplace_back(batch.data() + pos, sz);
         pos += sz;
     }
-    if (strings_size != chunk_meta.size) {
+    if (sizes_bytes + strings_size != chunk_meta.size) {
         throw std::runtime_error("Corrupted KIO batch: string column size mismatch");
     }
 
@@ -83,10 +83,24 @@ ctp::Column ReadColumnByType(size_t& pos, uint64_t row_num,
     throw std::runtime_error("Unsupported schema type");
 }
 
+ctp::Column ReadColumnFromFile(std::ifstream& file, uint64_t row_num,
+                               Schema::Types type) {
+    kio::ColumnChunkMeta chunk_meta =
+        bio::ReadPod<kio::ColumnChunkMeta>(file, "column chunk metadata");
+
+    std::string column_payload(chunk_meta.size, '\0');
+    bio::ReadBytes(file, column_payload.data(), column_payload.size(),
+                   "column payload");
+
+    size_t pos = 0;
+    return ReadColumnByType(pos, row_num, chunk_meta, column_payload, type);
+}
+
 }  // namespace
 
-KioDbReader::KioDbReader(const std::string& db_filename):
-    kio_file_(db_filename, std::ios::binary) {
+KioDbReader::KioDbReader(const std::string& db_filename,
+                         const Schema& schema):
+    kio_file_(db_filename, std::ios::binary), schema_(schema) {
     if (!kio_file_.is_open()) {
         throw std::runtime_error("Failed to open KIO file: " + db_filename);
     }
@@ -100,18 +114,6 @@ KioDbReader::KioDbReader(const std::string& db_filename):
 
 const Schema& KioDbReader::GetSchema() const {
     return schema_;
-}
-
-const std::vector<std::string>& KioDbReader::GetColumnNames() const {
-    return schema_.GetIndexToName();
-}
-
-const std::vector<Schema::Types>& KioDbReader::GetColumnTypes() const {
-    return schema_.GetIndexToType();
-}
-
-void KioDbReader::LoadSchema(Schema& schema) const {
-    schema = schema_;
 }
 
 void KioDbReader::Reset() {
@@ -131,8 +133,9 @@ void KioDbReader::ReadSchemaMeta() {
     uint64_t column_count = bio::ReadPod<uint64_t>(
         kio_file_, "schema column count");
 
-    std::vector<std::vector<std::string>> schema_rows;
-    schema_rows.reserve(static_cast<size_t>(column_count));
+    if (column_count != schema_.GetColumnCount()) {
+        throw std::runtime_error("KIO schema column count does not match schema");
+    }
 
     for (uint64_t i = 0; i < column_count; i++) {
         uint64_t name_size = bio::ReadPod<uint64_t>(
@@ -144,10 +147,11 @@ void KioDbReader::ReadSchemaMeta() {
         uint8_t type_id = bio::ReadPod<uint8_t>(kio_file_, "column type");
         Schema::Types type = Schema::TypeFromId(type_id);
 
-        schema_rows.push_back({column_name, Schema::TypeToString(type)});
+        if (column_name != schema_.SearchNameByIndex(i) ||
+            type != schema_.SearchTypeByIndex(i)) {
+            throw std::runtime_error("KIO schema metadata does not match schema");
+        }
     }
-
-    schema_.ImplSchema(schema_rows);
 }
 
 ctp::ColumnarBatch KioDbReader::ReadNextBatch() {
@@ -168,17 +172,80 @@ ctp::ColumnarBatch KioDbReader::ReadNextBatch() {
                    "batch data");
 
     size_t pos = 0;
+    std::vector<uint64_t> column_offsets;
+    column_offsets.reserve(static_cast<size_t>(batch_meta.col_num));
     for (size_t col = 0; col < batch_meta.col_num; col++) {
-        kio::ColumnChunkMeta chunk_meta = ReadColumnChunkMeta(readed_batch, pos);
-        batch.emplace_back(ReadColumnByType(
-            pos, batch_meta.row_num, chunk_meta, readed_batch,
-            schema_.SearchTypeByIndex(col)));
+        column_offsets.push_back(
+            bio::ReadPodFromBuffer<uint64_t>(readed_batch, pos, "column offset"));
     }
 
-    if (pos != readed_batch.size()) {
+    for (size_t col = 0; col < batch_meta.col_num; col++) {
+        if (column_offsets[col] > readed_batch.size()) {
+            throw std::runtime_error("Corrupted KIO batch: column offset is out of bounds");
+        }
+
+        size_t column_pos = static_cast<size_t>(column_offsets[col]);
+        kio::ColumnChunkMeta chunk_meta =
+            ReadColumnChunkMeta(readed_batch, column_pos);
+
+        if (chunk_meta.size > readed_batch.size() - column_pos) {
+            throw std::runtime_error("Corrupted KIO batch: column chunk is out of bounds");
+        }
+
+        const size_t payload_start = column_pos;
+        batch.emplace_back(ReadColumnByType(
+            column_pos, batch_meta.row_num, chunk_meta, readed_batch,
+            schema_.SearchTypeByIndex(col)));
+
+        if (column_pos != payload_start + chunk_meta.size) {
+            throw std::runtime_error("Corrupted KIO batch: column size mismatch");
+        }
+    }
+
+    if (pos > readed_batch.size()) {
         throw std::runtime_error("Corrupted KIO batch: payload size mismatch");
     }
 
     ctp::ValidateColumnarBatch(batch, schema_);
+    return batch;
+}
+
+ctp::ColumnarBatch KioDbReader::ReadNextProjectedBatch(
+    const std::vector<size_t>& column_indices) {
+    kio::BatchMeta batch_meta{};
+    if (!bio::TryReadPod(kio_file_, batch_meta, "batch metadata")) {
+        return {};
+    }
+
+    if (batch_meta.col_num != schema_.GetColumnCount()) {
+        throw std::runtime_error("KIO batch column count does not match schema");
+    }
+
+    std::vector<uint64_t> column_offsets;
+    column_offsets.reserve(static_cast<size_t>(batch_meta.col_num));
+    for (size_t col = 0; col < batch_meta.col_num; col++) {
+        column_offsets.push_back(
+            bio::ReadPod<uint64_t>(kio_file_, "column offset"));
+    }
+
+    ctp::ColumnarBatch batch;
+    batch.reserve(column_indices.size());
+
+    for (size_t col_idx : column_indices) {
+        Schema::Types type = schema_.SearchTypeByIndex(col_idx);
+        kio_file_.seekg(batch_meta.batch_start_offset + column_offsets[col_idx]);
+        if (!kio_file_.good()) {
+            throw std::runtime_error("Failed to seek column chunk");
+        }
+
+        batch.emplace_back(
+            ReadColumnFromFile(kio_file_, batch_meta.row_num, type));
+    }
+
+    kio_file_.seekg(batch_meta.batch_start_offset + batch_meta.batch_size);
+    if (!kio_file_.good()) {
+        throw std::runtime_error("Failed to seek next batch");
+    }
+
     return batch;
 }

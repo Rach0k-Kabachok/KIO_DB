@@ -1,6 +1,6 @@
-#include "csv_work/csv_exporter.h"
+#include "transport/csv/csv_exporter.h"
 
-#include <chrono>
+#include <cstdint>
 #include <iomanip>
 #include <string>
 #include <fstream>
@@ -11,9 +11,35 @@
 
 #include "columnar_batch.h"
 #include "column_operations.h"
-#include "kio_work/kio_db_reader.h"
+#include "transport/kio/kio_db_reader.h"
 
 namespace {
+constexpr int64_t kBaseYear = 1970;
+constexpr int64_t kMonthsPerYear = 12;
+constexpr int64_t kDaysPerMonth = 31;
+constexpr int64_t kHoursPerDay = 24;
+constexpr int64_t kMinutesPerHour = 60;
+constexpr int64_t kSecondsPerMinute = 60;
+constexpr int64_t kSecondsPerDay =
+    kHoursPerDay * kMinutesPerHour * kSecondsPerMinute;
+
+bool ShouldQuoteColumn(Schema::Types type) {
+    switch (type) {
+    case Schema::BIGINT:
+    case Schema::INTEGER:
+    case Schema::SMALLINT:
+        return false;
+    case Schema::TEXT:
+    case Schema::VARCHAR:
+    case Schema::CHAR:
+    case Schema::TIMESTAMP:
+    case Schema::DATE:
+        return true;
+    }
+
+    throw std::invalid_argument("Invalid schema type");
+}
+
 void WriteEscapedString(std::ofstream& csv_file, const std::string& value) {
     for (char ch : value) {
         if (ch == '"') {
@@ -24,33 +50,35 @@ void WriteEscapedString(std::ofstream& csv_file, const std::string& value) {
     }
 }
 
-std::string FormatDate(std::int32_t days) {
-    const std::chrono::sys_days date{std::chrono::days{days}};
-    const std::chrono::year_month_day ymd{date};
+std::string FormatDateCode(std::int64_t days) {
+    const int64_t day = days % kDaysPerMonth + 1;
+    days /= kDaysPerMonth;
+    const int64_t month = days % kMonthsPerYear + 1;
+    const int64_t year = kBaseYear + days / kMonthsPerYear;
 
-    std::ostringstream result;
-    result << std::setfill('0') << std::setw(4)
-           << static_cast<int>(ymd.year()) << '-'
-           << std::setw(2) << static_cast<unsigned>(ymd.month()) << '-'
-           << std::setw(2) << static_cast<unsigned>(ymd.day());
-    return result.str();
+    std::ostringstream out;
+    out << year << '-' << std::setw(2) << std::setfill('0') << month << '-'
+        << std::setw(2) << std::setfill('0') << day;
+    return out.str();
+}
+
+std::string FormatDate(std::int32_t days) {
+    return FormatDateCode(days);
 }
 
 std::string FormatTimestamp(std::int64_t seconds) {
-    const std::chrono::sys_seconds time{std::chrono::seconds{seconds}};
-    const auto date = std::chrono::floor<std::chrono::days>(time);
-    const std::chrono::year_month_day ymd{date};
-    const std::chrono::hh_mm_ss hms{time - date};
+    const int64_t date = seconds / kSecondsPerDay;
+    int64_t time = seconds % kSecondsPerDay;
+    const int64_t hour = time / (kMinutesPerHour * kSecondsPerMinute);
+    time %= kMinutesPerHour * kSecondsPerMinute;
+    const int64_t minute = time / kSecondsPerMinute;
+    const int64_t second = time % kSecondsPerMinute;
 
-    std::ostringstream result;
-    result << std::setfill('0') << std::setw(4)
-           << static_cast<int>(ymd.year()) << '-'
-           << std::setw(2) << static_cast<unsigned>(ymd.month()) << '-'
-           << std::setw(2) << static_cast<unsigned>(ymd.day()) << ' '
-           << std::setw(2) << hms.hours().count() << ':'
-           << std::setw(2) << hms.minutes().count() << ':'
-           << std::setw(2) << hms.seconds().count();
-    return result.str();
+    std::ostringstream out;
+    out << FormatDateCode(date) << ' ' << std::setw(2) << std::setfill('0')
+        << hour << ':' << std::setw(2) << std::setfill('0') << minute << ':'
+        << std::setw(2) << std::setfill('0') << second;
+    return out.str();
 }
 }  // namespace
 
@@ -120,9 +148,14 @@ void CsvExporter::WriteBatchToStream(const ctp::ColumnarBatch &batch) {
 
     for (size_t row_idx = 0; row_idx < num_rows; ++row_idx) {
         for (size_t col_idx = 0; col_idx < num_cols; ++col_idx) {
-            csv_file_ << '\"';
+            const bool should_quote = ShouldQuoteColumn(column_types[col_idx]);
+            if (should_quote) {
+                csv_file_ << '\"';
+            }
             WriteColumnValue(batch[col_idx], row_idx, column_types[col_idx]);
-            csv_file_ << '\"';
+            if (should_quote) {
+                csv_file_ << '\"';
+            }
             
             if (col_idx < num_cols - 1) {
                 csv_file_ << ',';

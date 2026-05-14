@@ -1,13 +1,14 @@
 add_library(kio_core STATIC
-        csv_work/csv_row_parser.cpp
-        csv_work/csv_batch_reader.cpp
-        csv_work/csv_formatter.cpp
-        csv_work/csv_exporter.cpp
+        transport/csv/csv_row_parser.cpp
+        transport/csv/csv_batch_reader.cpp
+        transport/csv/csv_columnar_reader.cpp
+        transport/csv/csv_exporter.cpp
 
-        kio_work/kio_db.cpp
-        kio_work/kio_db_reader.cpp
-        kio_work/kio_db_writer.cpp
-        kio_work/kio_serialization.cpp
+        transport/kio/kio_db_importer.cpp
+        transport/kio/kio_db_reader.cpp
+        transport/kio/kio_db_writer.cpp
+        transport/kio/kio_serialization.cpp
+        kio_db.cpp
 
         schema.cpp
         columnar_batch.cpp

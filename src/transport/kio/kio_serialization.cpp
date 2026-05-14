@@ -1,4 +1,4 @@
-#include "kio_work/kio_serialization.h"
+#include "transport/kio/kio_serialization.h"
 
 #include <cstring>
 #include <stdexcept>
@@ -27,7 +27,7 @@ size_t GetColumnPayloadSize(const ctp::Column& column) {
 }
 
 size_t GetBatchPayloadSize(const ctp::ColumnarBatch& batch) {
-    size_t result = 0;
+    size_t result = sizeof(uint64_t) * batch.size();
     for (const auto& column : batch) {
         result += GetColumnPayloadSize(column);
     }
@@ -87,7 +87,7 @@ std::pair<ColumnChunkMeta, std::vector<char>> SerializeColumn(const ctp::Column&
         const auto& strings = std::get<std::vector<std::string>>(column);
         uint64_t strings_total = 0;
         payload = SerializeStringColumn(strings, strings_total);
-        payload_size = strings_total;
+        payload_size = payload.size();
         break;
     }
     default:

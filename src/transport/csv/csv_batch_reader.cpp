@@ -1,4 +1,4 @@
-#include "csv_work/csv_batch_reader.h"
+#include "transport/csv/csv_batch_reader.h"
 
 #include <cstddef>
 #include <fstream>
@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "columnar_types.h"
-#include "csv_work/csv_row_parser.h"
+#include "transport/csv/csv_row_parser.h"
 
 size_t CSVBatchReader::CutBatchToNewLine(const std::string &buffer) {
     bool in_quote = false;
@@ -49,6 +49,15 @@ CSVBatchReader::CSVBatchReader(const std::string &filename)
 }
 
 ctp::ParsedBatch CSVBatchReader::ParseNextBatch() {
+    std::string buffer = ReadNextBuffer();
+    if (buffer.empty()) {
+        return {};
+    }
+
+    return ParseBuffer(std::move(buffer));
+}
+
+std::string CSVBatchReader::ReadNextBuffer() {
     if (eof_reached_) {
         return {};
     }
@@ -56,7 +65,7 @@ ctp::ParsedBatch CSVBatchReader::ParseNextBatch() {
     std::string buffer = std::move(pending_buffer_);
     pending_buffer_.clear();
 
-    while (true) { // read until we'll find end of line or end of file
+    while (true) { // читаем, пока не найдем конец строки или конец файла
         const size_t initial_size = buffer.size();
         buffer.resize(initial_size + kBatchSizeBytes);
 
@@ -72,12 +81,12 @@ ctp::ParsedBatch CSVBatchReader::ParseNextBatch() {
             if (buffer.empty()) {
                 return {};
             }
-            return ParseBuffer(std::move(buffer));
+            return buffer;
         }
 
         if (csv_stream_.eof()) {
             eof_reached_ = true;
-            return ParseBuffer(std::move(buffer));
+            return buffer;
         }
 
 
@@ -85,7 +94,7 @@ ctp::ParsedBatch CSVBatchReader::ParseNextBatch() {
         if (last_row_end != std::string::npos) {
             pending_buffer_ = buffer.substr(last_row_end + 1);
             buffer.resize(last_row_end + 1);
-            return ParseBuffer(std::move(buffer));
+            return buffer;
         }
     }
 }

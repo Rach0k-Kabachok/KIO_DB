@@ -4,12 +4,18 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include "transport/csv/csv_batch_reader.h"
 
 
 Schema::Schema(
         const std::vector<std::vector<std::string>>& column_names_types) {
     ImplSchema(column_names_types);
 }
+
+Schema::Schema(const std::string& schema_file) {
+    LoadSchema(schema_file);
+}
+
 
 Schema::Types Schema::ParseType(const std::string& type) {
     if (type == "BIGINT" || type == "int64") {
@@ -109,6 +115,22 @@ void Schema::ImplSchema(
         index_to_names_.push_back(col_name);
         index_to_types_.push_back(type);
     }
+}
+
+void Schema::LoadSchema(const std::string& schema_file) {
+    CSVBatchReader batch_reader(schema_file);
+    ctp::ParsedBatch schema;
+    ctp::ParsedBatch cur_batch;
+
+    while (!(cur_batch = batch_reader.ParseNextBatch()).empty()) {
+        if (schema.empty()) {
+            schema = std::move(cur_batch);
+        } else {
+            schema.insert(schema.end(), cur_batch.begin(), cur_batch.end());
+        }
+    }
+
+    ImplSchema(schema);
 }
 
 void Schema::Clear() {
