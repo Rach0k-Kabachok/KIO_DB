@@ -34,68 +34,61 @@ size_t GetBatchPayloadSize(const ctp::ColumnarBatch& batch) {
     return result;
 }
 
-std::vector<char> SerializeStringColumn(const std::vector<std::string>& strings, uint64_t& total_size) {
-    std::vector<char> result;
-    
-    // Сначала размеры строк
+std::vector<char> SerializeStringColumn(
+    const std::vector<std::string>& strings) {
     std::vector<uint64_t> str_sizes;
     str_sizes.reserve(strings.size());
-    total_size = 0;
-    
+    size_t strings_size = 0;
+
     for (const auto& str : strings) {
         str_sizes.push_back(str.size());
-        total_size += str.size();
+        strings_size += str.size();
     }
-    
-    size_t sizes_bytes = str_sizes.size() * sizeof(uint64_t);
-    result.resize(sizes_bytes);
+
+    const size_t sizes_bytes = str_sizes.size() * sizeof(uint64_t);
+    std::vector<char> result(sizes_bytes + strings_size);
     std::memcpy(result.data(), str_sizes.data(), sizes_bytes);
-    
-    // Потом сами строки
+
+    size_t offset = sizes_bytes;
     for (const auto& str : strings) {
-        result.insert(result.end(), str.begin(), str.end());
+        std::memcpy(result.data() + offset, str.data(), str.size());
+        offset += str.size();
     }
-    
+
     return result;
 }
 
-std::pair<ColumnChunkMeta, std::vector<char>> SerializeColumn(const ctp::Column& column, Schema::Types type) {
+std::pair<ColumnChunkMeta, std::vector<char>> SerializeColumn(
+    const ctp::Column& column, Schema::Types type) {
     std::vector<char> payload;
-    uint64_t payload_size = 0;
-    
+
     switch (type) {
     case Schema::BIGINT:
     case Schema::TIMESTAMP:
         payload = SerializeNumericColumn(std::get<std::vector<int64_t>>(column));
-        payload_size = payload.size();
         break;
     case Schema::INTEGER:
     case Schema::DATE:
         payload = SerializeNumericColumn(std::get<std::vector<int32_t>>(column));
-        payload_size = payload.size();
         break;
     case Schema::SMALLINT:
         payload = SerializeNumericColumn(std::get<std::vector<int16_t>>(column));
-        payload_size = payload.size();
         break;
     case Schema::CHAR:
         payload = SerializeNumericColumn(std::get<std::vector<char>>(column));
-        payload_size = payload.size();
         break;
     case Schema::TEXT:
     case Schema::VARCHAR: {
         const auto& strings = std::get<std::vector<std::string>>(column);
-        uint64_t strings_total = 0;
-        payload = SerializeStringColumn(strings, strings_total);
-        payload_size = payload.size();
+        payload = SerializeStringColumn(strings);
         break;
     }
     default:
         throw std::invalid_argument("Unsupported column type");
     }
-    
+
     ColumnChunkMeta meta;
-    meta.size = payload_size;
+    meta.size = payload.size();
     return {meta, payload};
 }
 

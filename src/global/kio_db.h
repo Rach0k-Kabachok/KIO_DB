@@ -1,13 +1,10 @@
-#include "schema.h"
-#include "transport/kio/kio_db_writer.h"
-#include "transport/kio/kio_db_reader.h"
-#include "transport/kio/kio_db_importer.h"
+#include "global/schema.h"
+#include <string>
 
 class KioDb {
     Schema schema_;
-    KioDbWriter writer_;
-    KioDbReader reader_;
-    KioDbImporter importer_;
+    std::string csv_in_file_;
+    std::string kio_db_file_;
 
 public:
     KioDb(const std::string& schema_file, const std::string& csv_in_file, 

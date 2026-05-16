@@ -2,15 +2,12 @@
 
 #include <cstdint>
 #include <iomanip>
-#include <string>
-#include <fstream>
+#include <optional>
 #include <sstream>
-#include <iostream>
 #include <stdexcept>
-#include <vector>
+#include <string>
 
-#include "columnar_batch.h"
-#include "column_operations.h"
+#include "global/column_operations.h"
 #include "transport/kio/kio_db_reader.h"
 
 namespace {
@@ -83,76 +80,38 @@ std::string FormatTimestamp(std::int64_t seconds) {
 }  // namespace
 
 CsvExporter::CsvExporter(KioDbReader& reader, const std::string& csv_filename)
-        : csv_name_(csv_filename), kio_reader_(reader) {
-    csv_file_.open(csv_name_, std::ios::out);
+        : kio_reader_(reader) {
+    csv_file_.open(csv_filename, std::ios::out);
     if (!csv_file_.is_open()) {
-        throw std::runtime_error("Cannot open CSV file for writing: " + csv_name_);
+        throw std::runtime_error("Cannot open CSV file for writing: " +
+                                 csv_filename);
     }
 }
 
 void CsvExporter::Export() {
-    size_t batch_count = 0;
-    while (true) {
-        ctp::ColumnarBatch batch = kio_reader_.ReadNextBatch();
-        if (batch.empty()) {
-            break;
-        }
-        WriteBatchToStream(batch);
-        batch_count++;
+    while (std::optional<KioReadBatch> batch = kio_reader_.ReadNextBatch()) {
+        WriteBatchToStream(*batch);
     }
-
-    if (batch_count == 0) {
-        std::cerr << "No batches to export" << std::endl;
-        return;
-    }
-
-    std::cout << "Successfully exported " << batch_count << " batches to "
-              << csv_name_ << std::endl;
 }
 
 
-void CsvExporter::ExportBatch(size_t batch_index) {
-    try {
-        for (size_t i = 0; i <= batch_index; i++) {
-            ctp::ColumnarBatch batch = kio_reader_.ReadNextBatch();
-            if (batch.empty()) {
-                throw std::runtime_error("Batch is empty");
-            }
-            if (i == batch_index) {
-                WriteBatchToStream(batch);
-                break;
-            }
-        }
-    } catch (const std::exception &e) {
-        throw std::runtime_error("Error exporting batch " +
-                                 std::to_string(batch_index) + ": " +
-                                 e.what());
-    }
-
-    std::cout << "Successfully exported batch " << batch_index << " to "
-            << csv_name_ << std::endl;
-}
-
-
-void CsvExporter::WriteBatchToStream(const ctp::ColumnarBatch &batch) {
-    if (batch.empty()) {
+void CsvExporter::WriteBatchToStream(const KioReadBatch& batch) {
+    if (batch.columns.empty()) {
         return;
     }
 
     const Schema& schema = kio_reader_.GetSchema();
-    ctp::ValidateColumnarBatch(batch, schema);
-
-    size_t num_rows = ctp::GetColumnRowCount(batch[0]);
-    size_t num_cols = batch.size();
-    const auto& column_types = schema.GetIndexToType();
+    const size_t num_rows = batch.row_count;
+    const size_t num_cols = batch.columns.size();
 
     for (size_t row_idx = 0; row_idx < num_rows; ++row_idx) {
         for (size_t col_idx = 0; col_idx < num_cols; ++col_idx) {
-            const bool should_quote = ShouldQuoteColumn(column_types[col_idx]);
+            const Schema::Types column_type = schema.ColumnType(col_idx);
+            const bool should_quote = ShouldQuoteColumn(column_type);
             if (should_quote) {
                 csv_file_ << '\"';
             }
-            WriteColumnValue(batch[col_idx], row_idx, column_types[col_idx]);
+            WriteColumnValue(batch.columns[col_idx], row_idx, column_type);
             if (should_quote) {
                 csv_file_ << '\"';
             }
@@ -166,7 +125,8 @@ void CsvExporter::WriteBatchToStream(const ctp::ColumnarBatch &batch) {
     }
 }
 
-void CsvExporter::WriteColumnValue(const ctp::Column& column, size_t row_idx, Schema::Types type) {
+void CsvExporter::WriteColumnValue(const ctp::Column& column, size_t row_idx,
+                                   Schema::Types type) {
     switch (type) {
     case Schema::BIGINT:
         csv_file_ << ctp::GetColumnData<int64_t>(column)[row_idx];
@@ -179,7 +139,8 @@ void CsvExporter::WriteColumnValue(const ctp::Column& column, size_t row_idx, Sc
         break;
     case Schema::TEXT:
     case Schema::VARCHAR:
-        WriteEscapedString(csv_file_, ctp::GetColumnData<std::string>(column)[row_idx]);
+        WriteEscapedString(csv_file_,
+                           ctp::GetColumnData<std::string>(column)[row_idx]);
         break;
     case Schema::CHAR: {
         const char ch = ctp::GetColumnData<char>(column)[row_idx];
@@ -191,10 +152,14 @@ void CsvExporter::WriteColumnValue(const ctp::Column& column, size_t row_idx, Sc
         break;
     }
     case Schema::TIMESTAMP:
-        WriteEscapedString(csv_file_, FormatTimestamp(ctp::GetColumnData<int64_t>(column)[row_idx]));
+        WriteEscapedString(
+            csv_file_,
+            FormatTimestamp(ctp::GetColumnData<int64_t>(column)[row_idx]));
         break;
     case Schema::DATE:
-        WriteEscapedString(csv_file_, FormatDate(ctp::GetColumnData<int32_t>(column)[row_idx]));
+        WriteEscapedString(
+            csv_file_,
+            FormatDate(ctp::GetColumnData<int32_t>(column)[row_idx]));
         break;
     }
 }

@@ -4,6 +4,7 @@ add_executable(kio_db_tests
         csv_rw/csv_columnar_reader_test.cpp
         csv_rw/red_write_test.cpp
         csv_rw/hits_round_trip_test.cpp
+        execution/limit_op_test.cpp
 )
 
 target_link_libraries(kio_db_tests PRIVATE kio_core GTest::gtest_main)

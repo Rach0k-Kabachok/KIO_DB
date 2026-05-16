@@ -4,25 +4,30 @@
 #include <fstream>
 #include <string>
 
-#include "columnar_types.h"
-#include "schema.h"
+#include "global/columnar_types.h"
+#include "global/schema.h"
+#include "transport/kio/kio_format.h"
 
 class KioDbWriter {
 public:
     KioDbWriter(const std::string& output_filename, const Schema& schema);
+    ~KioDbWriter();
 
     void WriteBatchToFile(const ctp::ColumnarBatch& batch);
+    void Finalize();
 
 private:
-    void WriteSchemaMeta();
+    void WriteHeader();
+    void WriteFooter();
 
-    void WriteBatchMeta(const ctp::ColumnarBatch& batch);
-    void WriteColumns(const ctp::ColumnarBatch& batch);
+    kio::BatchMeta MakeBatchMeta(const ctp::ColumnarBatch& batch);
+    std::vector<kio::ColumnChunkInfo> WriteColumns(
+        const ctp::ColumnarBatch& batch);
 
     std::ofstream kio_file_;
-    std::string kio_name_;
 
-    const Schema& schema_;
+    kio::FileMetadata metadata_;
 
     size_t cur_batch_ = 0;
+    bool finalized_ = false;
 };

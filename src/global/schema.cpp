@@ -2,18 +2,19 @@
 
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
-#include <unordered_map>
+
 #include "transport/csv/csv_batch_reader.h"
 
 
 Schema::Schema(
         const std::vector<std::vector<std::string>>& column_names_types) {
-    ImplSchema(column_names_types);
+    ResetFromRows(column_names_types);
 }
 
 Schema::Schema(const std::string& schema_file) {
-    LoadSchema(schema_file);
+    LoadFromCsv(schema_file);
 }
 
 
@@ -39,30 +40,6 @@ Schema::Types Schema::ParseType(const std::string& type) {
     throw std::invalid_argument("Invalid schema type: " + type);
 }
 
-Schema::Types Schema::TypeFromId(uint8_t type_id) {
-    switch (type_id) {
-    case BIGINT:
-        return BIGINT;
-    case INTEGER:
-        return INTEGER;
-    case SMALLINT:
-        return SMALLINT;
-    case TEXT:
-        return TEXT;
-    case VARCHAR:
-        return VARCHAR;
-    case CHAR:
-        return CHAR;
-    case TIMESTAMP:
-        return TIMESTAMP;
-    case DATE:
-        return DATE;
-    }
-
-    throw std::invalid_argument("Invalid schema type id: " +
-                                std::to_string(type_id));
-}
-
 std::string Schema::TypeToString(Types type) {
     switch (type) {
     case BIGINT:
@@ -86,7 +63,19 @@ std::string Schema::TypeToString(Types type) {
     throw std::invalid_argument("Invalid schema type");
 }
 
-void Schema::ImplSchema(
+Schema Schema::FromRows(
+        const std::vector<std::vector<std::string>>& column_names_types) {
+    return Schema(column_names_types);
+}
+
+Schema Schema::FromColumns(std::vector<std::string> column_names,
+                           std::vector<Types> column_types) {
+    Schema schema;
+    schema.ResetFromColumns(std::move(column_names), std::move(column_types));
+    return schema;
+}
+
+void Schema::ResetFromRows(
         const std::vector<std::vector<std::string>>& column_names_types) {
     Clear();
 
@@ -117,7 +106,32 @@ void Schema::ImplSchema(
     }
 }
 
-void Schema::LoadSchema(const std::string& schema_file) {
+void Schema::ResetFromColumns(std::vector<std::string> column_names,
+                              std::vector<Types> column_types) {
+    Clear();
+
+    if (column_names.size() != column_types.size()) {
+        throw std::invalid_argument(
+            "Schema column names and types have different sizes");
+    }
+
+    names_to_index_.reserve(column_names.size());
+    index_to_names_.reserve(column_names.size());
+    index_to_types_.reserve(column_types.size());
+
+    for (size_t i = 0; i < column_names.size(); ++i) {
+        if (names_to_index_.contains(column_names[i])) {
+            throw std::invalid_argument(
+                "Duplicate column name in schema: " + column_names[i]);
+        }
+
+        names_to_index_[column_names[i]] = i;
+        index_to_names_.push_back(std::move(column_names[i]));
+        index_to_types_.push_back(column_types[i]);
+    }
+}
+
+void Schema::LoadFromCsv(const std::string& schema_file) {
     CSVBatchReader batch_reader(schema_file);
     ctp::ParsedBatch schema;
     ctp::ParsedBatch cur_batch;
@@ -130,7 +144,7 @@ void Schema::LoadSchema(const std::string& schema_file) {
         }
     }
 
-    ImplSchema(schema);
+    ResetFromRows(schema);
 }
 
 void Schema::Clear() {
@@ -139,23 +153,7 @@ void Schema::Clear() {
     index_to_names_.clear();
 }
 
-
-const std::unordered_map<std::string, size_t>& Schema::GetNameToIndex() const {
-    return names_to_index_;
-}
-
-
-const std::vector<Schema::Types>& Schema::GetIndexToType() const {
-    return index_to_types_;
-}
-
-
-const std::vector<std::string>& Schema::GetIndexToName() const {
-    return index_to_names_;
-}
-
-
-size_t Schema::GetIndex(const std::string& name) const {
+size_t Schema::ColumnIndex(const std::string& name) const {
     auto it = names_to_index_.find(name);
     if (it == names_to_index_.end()) {
         throw std::out_of_range("Column not found in schema: " + name);
@@ -164,15 +162,20 @@ size_t Schema::GetIndex(const std::string& name) const {
 }
 
 
-Schema::Types Schema::SearchTypeByIndex(size_t index) const {
+Schema::Types Schema::ColumnType(size_t index) const {
     if (index >= index_to_types_.size()) {
         throw std::out_of_range("Column index out of range");
     }
     return index_to_types_[index];
 }
 
+Schema::Types Schema::ColumnType(const std::string& name) const {
+    return ColumnType(ColumnIndex(name));
+}
 
-const std::string& Schema::SearchNameByIndex(size_t index) const {
+
+
+const std::string& Schema::ColumnName(size_t index) const {
     if (index >= index_to_names_.size()) {
         throw std::out_of_range("Column index out of range: " +
                                 std::to_string(index));
@@ -181,11 +184,32 @@ const std::string& Schema::SearchNameByIndex(size_t index) const {
 }
 
 
-size_t Schema::GetColumnCount() const {
+size_t Schema::ColumnCount() const {
     return index_to_names_.size();
 }
 
 
-bool Schema::IsEmpty() const {
-    return index_to_names_.empty();
+Schema Schema::ProjectByIndices(const std::vector<size_t>& column_indices) const {
+    std::vector<std::string> names;
+    std::vector<Types> types;
+    names.reserve(column_indices.size());
+    types.reserve(column_indices.size());
+
+    for (size_t index : column_indices) {
+        names.push_back(ColumnName(index));
+        types.push_back(ColumnType(index));
+    }
+
+    return FromColumns(std::move(names), std::move(types));
+}
+
+Schema Schema::ProjectByNames(const std::vector<std::string>& column_names) const {
+    std::vector<size_t> indices;
+    indices.reserve(column_names.size());
+
+    for (const std::string& name : column_names) {
+        indices.push_back(ColumnIndex(name));
+    }
+
+    return ProjectByIndices(indices);
 }

@@ -29,7 +29,7 @@ bool ColumnMatchesType(const Column& column, Schema::Types type) {
 }
 
 void ValidateParsedBatch(const ParsedBatch& batch, const Schema& schema) {
-    const size_t expected_cols = schema.GetColumnCount();
+    const size_t expected_cols = schema.ColumnCount();
 
     for (size_t row_idx = 0; row_idx < batch.size(); row_idx++) {
         if (batch[row_idx].size() != expected_cols) {
@@ -46,16 +46,16 @@ void ValidateColumnarBatch(const ColumnarBatch& batch, const Schema& schema) {
         return;
     }
 
-    if (batch.size() != schema.GetColumnCount()) {
+    if (batch.size() != schema.ColumnCount()) {
         throw std::runtime_error("Columnar batch has " +
                                  std::to_string(batch.size()) +
                                  " columns, expected " +
-                                 std::to_string(schema.GetColumnCount()));
+                                 std::to_string(schema.ColumnCount()));
     }
 
     const size_t row_num = GetColumnRowCount(batch[0]);
     for (size_t col_idx = 0; col_idx < batch.size(); col_idx++) {
-        if (!ColumnMatchesType(batch[col_idx], schema.SearchTypeByIndex(col_idx))) {
+        if (!ColumnMatchesType(batch[col_idx], schema.ColumnType(col_idx))) {
             throw std::runtime_error("Column " + std::to_string(col_idx) +
                                      " type does not match schema");
         }

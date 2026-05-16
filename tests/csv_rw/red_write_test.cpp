@@ -1,5 +1,8 @@
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -61,8 +64,7 @@ TEST(ReadWrite, JustWorks) {
     ASSERT_GT(std::filesystem::file_size(path_db), 0u);
 
     {
-        Schema schema = LoadReadWriteTestSchema(path_schema);
-        KioDbReader reader(path_db, schema);
+        KioDbReader reader(path_db);
         ASSERT_NO_THROW({
             CsvExporter exporter(reader, path_out_csv);
             exporter.Export();
@@ -104,9 +106,12 @@ TEST(ReadWrite, RoundTripBatchAndEOF) {
         ASSERT_NO_THROW(writer.WriteBatchToFile(expected));
     }
 
-    KioDbReader reader(path_db, schema);
-    EXPECT_EQ(reader.ReadNextBatch(), expected);
-    EXPECT_TRUE(reader.ReadNextBatch().empty());
+    KioDbReader reader(path_db);
+    std::optional<KioReadBatch> actual = reader.ReadNextBatch();
+    ASSERT_TRUE(actual.has_value());
+    EXPECT_EQ(actual->columns, expected);
+    EXPECT_EQ(actual->row_count, 3u);
+    EXPECT_FALSE(reader.ReadNextBatch().has_value());
 
     std::filesystem::remove(path_db, ec);
 }
@@ -134,35 +139,98 @@ TEST(ReadWrite, ReadsProjectedColumns) {
         writer.WriteBatchToFile(second_batch);
     }
 
-    KioDbReader reader(path_db, schema);
+    KioDbReader reader(path_db);
     ctp::ColumnarBatch expected_first = {
         ctp::Column{std::vector<int16_t>{1, 2}},
         ctp::Column{std::vector<std::string>{"alpha", "beta"}}};
-    EXPECT_EQ(reader.ReadNextProjectedBatch({2, 0}), expected_first);
+    std::optional<KioReadBatch> actual_first = reader.ReadNextBatch({2, 0});
+    ASSERT_TRUE(actual_first.has_value());
+    EXPECT_EQ(actual_first->columns, expected_first);
+    EXPECT_EQ(actual_first->row_count, 2u);
 
     ctp::ColumnarBatch expected_second = {
         ctp::Column{std::vector<int64_t>{30, 40}}};
-    EXPECT_EQ(reader.ReadNextProjectedBatch({1}), expected_second);
-    EXPECT_TRUE(reader.ReadNextProjectedBatch({1}).empty());
+    std::optional<KioReadBatch> actual_second = reader.ReadNextBatch({1});
+    ASSERT_TRUE(actual_second.has_value());
+    EXPECT_EQ(actual_second->columns, expected_second);
+    EXPECT_EQ(actual_second->row_count, 2u);
+    EXPECT_FALSE(reader.ReadNextBatch({1}).has_value());
 
     std::filesystem::remove(path_db, ec);
 }
 
-TEST(ReadWrite, EmptyFileReturnsEmptyBatch) {
+TEST(ReadWrite, StoresSelfContainedFooterMetadata) {
+    const std::string path_db =
+        ReadWriteTestOutputPath("kio_db_footer_metadata_test.kiodb").string();
+
+    std::error_code ec;
+    std::filesystem::remove(path_db, ec);
+
+    Schema schema({{"str", "string"}, {"integers", "int64"}});
+    ctp::ColumnarBatch batch = {
+        ctp::Column{std::vector<std::string>{"beta", "alpha"}},
+        ctp::Column{std::vector<int64_t>{10, 20}}};
+
+    {
+        KioDbWriter writer(path_db, schema);
+        writer.WriteBatchToFile(batch);
+        writer.Finalize();
+    }
+
+    KioDbReader reader(path_db);
+    const kio::FileMetadata& metadata = reader.GetMetadata();
+    EXPECT_EQ(metadata.row_count, 2u);
+    EXPECT_EQ(metadata.schema.ColumnCount(), 2u);
+    EXPECT_EQ(metadata.schema.ColumnName(0), "str");
+    EXPECT_EQ(metadata.schema.ColumnType(1), Schema::BIGINT);
+    ASSERT_EQ(metadata.row_groups.size(), 1u);
+    EXPECT_EQ(metadata.row_groups[0].batch.row_num, 2u);
+    ASSERT_EQ(metadata.row_groups[0].columns.size(), 2u);
+    EXPECT_EQ(metadata.row_groups[0].columns[0].encoding, kio::Encoding::PLAIN);
+    EXPECT_EQ(metadata.row_groups[0].columns[0].compression, kio::Compression::NONE);
+    EXPECT_TRUE(metadata.row_groups[0].columns[1].has_min_max);
+    EXPECT_EQ(metadata.row_groups[0].columns[1].min_value, "10");
+    EXPECT_EQ(metadata.row_groups[0].columns[1].max_value, "20");
+
+    std::filesystem::remove(path_db, ec);
+}
+
+TEST(ReadWrite, RejectsInvalidMagic) {
+    const std::string path_db =
+        ReadWriteTestOutputPath("kio_db_invalid_magic_test.kiodb").string();
+
+    std::error_code ec;
+    std::filesystem::remove(path_db, ec);
+
+    {
+        std::ofstream output(path_db, std::ios::binary);
+        ASSERT_TRUE(output.is_open());
+        output.write("BAD!", 4);
+        const uint64_t footer_offset = 12;
+        output.write(reinterpret_cast<const char*>(&footer_offset),
+                     sizeof(footer_offset));
+    }
+
+    EXPECT_THROW(KioDbReader reader(path_db), std::runtime_error);
+
+    std::filesystem::remove(path_db, ec);
+}
+
+TEST(ReadWrite, EmptyKioFileReturnsEmptyBatch) {
     const std::string path_db =
         ReadWriteTestOutputPath("kio_db_empty_file_test.kiodb").string();
 
     std::error_code ec;
     std::filesystem::remove(path_db, ec);
 
+    Schema schema(std::vector<std::vector<std::string> >{{"str", "string"}});
     {
-        std::ofstream out(path_db, std::ios::binary);
-        ASSERT_TRUE(out.is_open());
+        KioDbWriter writer(path_db, schema);
+        writer.Finalize();
     }
 
-    Schema schema(std::vector<std::vector<std::string> >{{"str", "string"}});
-    KioDbReader reader(path_db, schema);
-    EXPECT_TRUE(reader.ReadNextBatch().empty());
+    KioDbReader reader(path_db);
+    EXPECT_FALSE(reader.ReadNextBatch().has_value());
 
     std::filesystem::remove(path_db, ec);
 }

@@ -151,7 +151,7 @@ void RoundTripCsvToKioAndBack(const std::filesystem::path& input_csv,
     }
 
     {
-        KioDbReader reader(kio_db.string(), schema);
+        KioDbReader reader(kio_db.string());
         CsvExporter exporter(reader, output_csv.string());
         exporter.Export();
     }

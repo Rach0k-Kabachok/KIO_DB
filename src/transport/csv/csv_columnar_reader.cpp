@@ -26,10 +26,10 @@ CSVColumnarReader::CSVColumnarReader(const std::string& data_name,
 
 ctp::ColumnarBatch CSVColumnarReader::MakeEmptyBatch(size_t reserve_rows) const {
     ctp::ColumnarBatch batch;
-    batch.reserve(schema_.GetColumnCount());
+    batch.reserve(schema_.ColumnCount());
 
-    for (size_t col_idx = 0; col_idx < schema_.GetColumnCount(); ++col_idx) {
-        switch (schema_.SearchTypeByIndex(col_idx)) {
+    for (size_t col_idx = 0; col_idx < schema_.ColumnCount(); ++col_idx) {
+        switch (schema_.ColumnType(col_idx)) {
         case Schema::BIGINT:
         case Schema::TIMESTAMP:
             AddTypedColumn<int64_t>(batch, reserve_rows);
@@ -56,7 +56,7 @@ ctp::ColumnarBatch CSVColumnarReader::MakeEmptyBatch(size_t reserve_rows) const 
 
 void CSVColumnarReader::AppendField(ctp::ColumnarBatch& batch, size_t col_idx,
                                     std::string_view field) const {
-    switch (schema_.SearchTypeByIndex(col_idx)) {
+    switch (schema_.ColumnType(col_idx)) {
     case Schema::BIGINT:
         std::get<std::vector<int64_t>>(batch[col_idx]).push_back(
             csv::ParseInteger<int64_t>(field));

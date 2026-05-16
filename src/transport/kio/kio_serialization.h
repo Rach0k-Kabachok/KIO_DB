@@ -12,14 +12,10 @@
 
 namespace kio {
 
-// Получить размер полезной нагрузки для одной колонки
 size_t GetColumnPayloadSize(const ctp::Column& column);
 
-// Получить полный размер пакета с метаданными колонок
 size_t GetBatchPayloadSize(const ctp::ColumnarBatch& batch);
 
-// Преобразовать колонку в буфер для записи в файл
-// Возвращает пару: метаданные и буфер данных
 std::pair<ColumnChunkMeta, std::vector<char>> SerializeColumn(const ctp::Column& column, Schema::Types type);
 
 // Вспомогательные функции для сортировки вывода данных
@@ -30,6 +26,6 @@ std::vector<char> SerializeNumericColumn(const std::vector<T>& values) {
     return result;
 }
 
-std::vector<char> SerializeStringColumn(const std::vector<std::string>& strings, uint64_t& total_size);
+std::vector<char> SerializeStringColumn(const std::vector<std::string>& strings);
 
 }  // namespace kio

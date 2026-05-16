@@ -1,7 +1,6 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -51,15 +50,13 @@ TEST(CSVColumnarReaderTest, MakeFileColumnar) {
     expected.clear();
     EXPECT_EQ(reader.MakeColumnarBatch(), expected);
 
-    std::unordered_map<std::string, size_t> expected_names_to_index = {
-        {"str", 0}, {"integers", 1}};
-    std::vector<Schema::Types> expected_index_to_types{Schema::TEXT,
-                                                       Schema::BIGINT};
-    std::vector<std::string> expected_index_to_names{"str", "integers"};
-
-    EXPECT_EQ(schema.GetIndexToName(), expected_index_to_names);
-    EXPECT_EQ(schema.GetIndexToType(), expected_index_to_types);
-    EXPECT_EQ(schema.GetNameToIndex(), expected_names_to_index);
+    EXPECT_EQ(schema.ColumnCount(), 2u);
+    EXPECT_EQ(schema.ColumnName(0), "str");
+    EXPECT_EQ(schema.ColumnName(1), "integers");
+    EXPECT_EQ(schema.ColumnIndex("str"), 0u);
+    EXPECT_EQ(schema.ColumnIndex("integers"), 1u);
+    EXPECT_EQ(schema.ColumnType(0), Schema::TEXT);
+    EXPECT_EQ(schema.ColumnType(1), Schema::BIGINT);
 }
 
 TEST(CSVColumnarReaderTest, ParsesTypesAndQuotedStrings) {

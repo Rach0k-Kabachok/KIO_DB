@@ -1,34 +1,37 @@
 #pragma once
 
 #include <fstream>
+#include <optional>
 #include <string>
 #include <vector>
 
-#include "columnar_types.h"
-#include "schema.h"
+#include "global/columnar_types.h"
+#include "global/schema.h"
+#include "transport/kio/kio_format.h"
+
+struct KioReadBatch {
+    ctp::ColumnarBatch columns;
+    uint64_t row_count = 0;
+};
 
 class KioDbReader {
-
 public:
-    KioDbReader(const std::string& db_filename, const Schema& schema);
+    explicit KioDbReader(const std::string& db_filename);
 
     const Schema& GetSchema() const;
+    const kio::FileMetadata& GetMetadata() const;
 
-    const std::vector<std::string>& GetColumnNames() const;
-    const std::vector<Schema::Types>& GetColumnTypes() const;
+    std::optional<KioReadBatch> ReadNextBatch();
 
-    void Reset();
-
-    ctp::ColumnarBatch ReadNextBatch();
-
-    ctp::ColumnarBatch ReadNextProjectedBatch(
+    std::optional<KioReadBatch> ReadNextBatch(
         const std::vector<size_t>& column_indices);
 
 private:
-    void ReadSchemaMeta();
+    void Reset();
+    void ReadHeader();
+    void ReadFooter(uint64_t footer_offset);
 
     std::ifstream kio_file_;
-    std::streampos batches_start_pos_ = 0;
-    const Schema& schema_;
-
+    kio::FileMetadata metadata_;
+    size_t next_row_group_ = 0;
 };

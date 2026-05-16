@@ -26,20 +26,9 @@ inline const std::vector<std::string>& GetColumnData<std::string>(const Column& 
     return std::get<std::vector<std::string>>(column);
 }
 
-// Получить значение из колонки по индексу строки
-std::string GetColumnValue(const Column& column, size_t row_idx, Schema::Types type);
+Column MakeEmptyColumn(Schema::Types type, size_t reserve_rows = 0);
 
-// Получить значение как строку без форматирования (для отладки)
-std::string GetColumnValueAsString(const Column& column, size_t row_idx, Schema::Types type);
-
-// Применить операцию к каждому элементу колонки
-template<typename F>
-void VisitColumnElements(const Column& column, F&& visitor) {
-    std::visit([&visitor](const auto& values) {
-        for (const auto& value : values) {
-            visitor(value);
-        }
-    }, column);
-}
+void AppendColumnValue(Column& dst, const Column& src, size_t row_idx,
+                       Schema::Types type);
 
 }  // namespace ctp

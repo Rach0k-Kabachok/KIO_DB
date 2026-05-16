@@ -8,11 +8,16 @@ add_library(kio_core STATIC
         transport/kio/kio_db_reader.cpp
         transport/kio/kio_db_writer.cpp
         transport/kio/kio_serialization.cpp
-        kio_db.cpp
 
-        schema.cpp
-        columnar_batch.cpp
-        column_operations.cpp
+        global/kio_db.cpp
+        global/schema.cpp
+        global/columnar_batch.cpp
+        global/column_operations.cpp
+
+        execution/table_scan_op.cpp
+        execution/filter_op.cpp
+        execution/project_op.cpp
+        execution/limit_op.cpp
 
 )
 

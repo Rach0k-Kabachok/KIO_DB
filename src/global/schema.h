@@ -3,8 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 struct Schema {
     enum Types {
@@ -23,38 +23,43 @@ struct Schema {
     explicit Schema(
         const std::vector<std::vector<std::string>>& column_names_types);
     
-    explicit Schema (const std::string& schema_file);
+    explicit Schema(const std::string& schema_file);
 
-    void ImplSchema(
+    static Schema FromRows(
         const std::vector<std::vector<std::string>>& column_names_types);
-    
-    void LoadSchema(const std::string& schema_file);    
 
-    void Clear();
+    static Schema FromColumns(std::vector<std::string> column_names,
+                              std::vector<Types> column_types);
 
     static Types ParseType(const std::string& type);
 
-    static Types TypeFromId(uint8_t type_id);
-
     static std::string TypeToString(Types type);
 
-    const std::unordered_map<std::string, size_t>& GetNameToIndex() const;
+    size_t ColumnIndex(const std::string& name) const;
 
-    const std::vector<Types>& GetIndexToType() const;
+    Types ColumnType(size_t index) const;
 
-    const std::vector<std::string>& GetIndexToName() const;
+    Types ColumnType(const std::string& name) const;
 
-    size_t GetIndex(const std::string& name) const;
+    const std::string& ColumnName(size_t index) const;
 
-    Types SearchTypeByIndex(size_t index) const;
-    
-    const std::string& SearchNameByIndex(size_t index) const;
+    size_t ColumnCount() const;
 
-    size_t GetColumnCount() const;
+    Schema ProjectByIndices(const std::vector<size_t>& column_indices) const;
 
-    bool IsEmpty() const;
+    Schema ProjectByNames(const std::vector<std::string>& column_names) const;
 
 private:
+    void ResetFromRows(
+        const std::vector<std::vector<std::string>>& column_names_types);
+
+    void ResetFromColumns(std::vector<std::string> column_names,
+                          std::vector<Types> column_types);
+
+    void LoadFromCsv(const std::string& schema_file);
+
+    void Clear();
+
     std::unordered_map<std::string, size_t> names_to_index_;
     std::vector<Types> index_to_types_;
     std::vector<std::string> index_to_names_;

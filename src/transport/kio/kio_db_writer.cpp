@@ -1,9 +1,12 @@
 #include "transport/kio/kio_db_writer.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "column_operations.h"
@@ -14,37 +17,87 @@
 #include "transport/kio/kio_serialization.h"
 #include "schema.h"
 
+namespace {
+constexpr std::streamoff kFooterOffsetPosition =
+    sizeof(kio::kMagic);
+
+struct SerializedColumnChunk {
+    uint64_t local_offset = 0;
+    kio::ColumnChunkMeta meta{};
+    kio::ColumnChunkInfo info{};
+    std::vector<char> payload;
+};
+
+void WriteString(std::ostream& output, const std::string& value) {
+    const uint64_t size = value.size();
+    bio::WritePod(output, size);
+    bio::WriteBytes(output, value.data(), size);
+}
+
+template <typename T>
+kio::ColumnChunkInfo MakeStatsForValues(const std::vector<T>& values) {
+    kio::ColumnChunkInfo info;
+    if (values.empty()) {
+        return info;
+    }
+
+    auto [min_it, max_it] = std::minmax_element(values.begin(), values.end());
+    info.has_min_max = true;
+
+    if constexpr (std::is_same_v<T, std::string>) {
+        info.min_value = *min_it;
+        info.max_value = *max_it;
+    } else if constexpr (std::is_same_v<T, char>) {
+        info.min_value = std::string(1, *min_it);
+        info.max_value = std::string(1, *max_it);
+    } else {
+        info.min_value = std::to_string(*min_it);
+        info.max_value = std::to_string(*max_it);
+    }
+
+    return info;
+}
+
+kio::ColumnChunkInfo MakeColumnInfo(const ctp::Column& column,
+                                    uint64_t local_offset,
+                                    uint64_t payload_size) {
+    kio::ColumnChunkInfo info = std::visit(
+        [](const auto& values) { return MakeStatsForValues(values); }, column);
+
+    info.local_offset = local_offset;
+    info.compressed_size = payload_size;
+    info.uncompressed_size = payload_size;
+    info.encoding = kio::Encoding::PLAIN;
+    info.compression = kio::Compression::NONE;
+    return info;
+}
+}  // namespace
+
 KioDbWriter::KioDbWriter(const std::string& output_filename, const Schema& schema)
-    : kio_name_(output_filename), schema_(schema) {
+    : metadata_.schema(schema), metadata_{schema, 0, {}} {
 
-    kio_file_.open(kio_name_, std::ios::binary | std::ios::out);
+    kio_file_.open(output_filename, std::ios::binary | std::ios::out);
     if (!kio_file_.is_open()) {
-        throw std::runtime_error("Failed to open file: " + kio_name_);
+        throw std::runtime_error("Failed to open file: " + output_filename);
     }
 
-    WriteSchemaMeta();
+    WriteHeader();
 }
 
-void KioDbWriter::WriteSchemaMeta() {
-    uint64_t column_count = schema_.GetColumnCount();
-    bio::WritePod(kio_file_, column_count, "schema column count");
-
-    for (uint64_t i = 0; i < column_count; i++) {
-        const std::string& column_name = schema_.SearchNameByIndex(i);
-        uint64_t name_size = static_cast<uint64_t>(column_name.size());
-        uint8_t type = static_cast<uint8_t>(schema_.SearchTypeByIndex(i));
-
-        bio::WritePod(kio_file_, name_size, "column name size");
-        bio::WriteBytes(kio_file_, column_name.data(), name_size,
-                        "column name");
-        bio::WritePod(kio_file_, type, "column type");
+KioDbWriter::~KioDbWriter() {
+    try {
+        Finalize();
+    } catch (...) {
     }
 }
 
-void KioDbWriter::WriteBatchMeta(const ctp::ColumnarBatch& batch) {
-    if (batch.empty()) {
-        return;
-    }
+void KioDbWriter::WriteHeader() {
+    const uint64_t footer_offset = 0;
+    bio::WriteBytes(kio_file_, kio::kMagic, sizeof(kio::kMagic));
+    bio::WritePod(kio_file_, footer_offset);
+}
+
+kio::BatchMeta KioDbWriter::MakeBatchMeta(const ctp::ColumnarBatch& batch) {
     std::streampos batch_meta_pos = kio_file_.tellp();
     if (batch_meta_pos == std::streampos(-1)) {
         throw std::runtime_error("Failed to get batch metadata position");
@@ -58,49 +111,118 @@ void KioDbWriter::WriteBatchMeta(const ctp::ColumnarBatch& batch) {
         static_cast<uint64_t>(batch_meta_pos) + sizeof(kio::BatchMeta);
     batch_meta.batch_size = kio::GetBatchPayloadSize(batch);
 
-    bio::WritePod(kio_file_, batch_meta, "batch metadata");
+    return batch_meta;
 }
 
-void KioDbWriter::WriteColumns(const ctp::ColumnarBatch& batch) {
-    std::vector<uint64_t> column_offsets;
-    std::vector<kio::ColumnChunkMeta> column_metas;
-    std::vector<std::vector<char>> column_payloads;
-    column_offsets.reserve(batch.size());
-    column_metas.reserve(batch.size());
-    column_payloads.reserve(batch.size());
+std::vector<kio::ColumnChunkInfo> KioDbWriter::WriteColumns(
+    const ctp::ColumnarBatch& batch) {
+    std::vector<SerializedColumnChunk> chunks;
+    std::vector<kio::ColumnChunkInfo> column_infos;
+    chunks.reserve(batch.size());
+    column_infos.reserve(batch.size());
 
     uint64_t column_offset =
-        sizeof(uint64_t) * static_cast<uint64_t>(batch.size());
+        sizeof(uint64_t) * batch.size();
 
     for (size_t col_idx = 0; col_idx < batch.size(); ++col_idx) {
         const auto& column = batch[col_idx];
-        Schema::Types col_type = schema_.SearchTypeByIndex(col_idx);
+        const Schema::Types col_type = metadata_.schema.ColumnType(col_idx);
 
         auto [meta, payload] = kio::SerializeColumn(column, col_type);
-        column_offsets.push_back(column_offset);
+        SerializedColumnChunk chunk;
+        chunk.local_offset = column_offset;
+        chunk.meta = meta;
+        chunk.info = MakeColumnInfo(column, column_offset, meta.size);
+        chunk.payload = std::move(payload);
         column_offset += sizeof(kio::ColumnChunkMeta) + meta.size;
-        column_metas.push_back(meta);
-        column_payloads.push_back(std::move(payload));
+        column_infos.push_back(std::move(chunk.info));
+        chunks.push_back(std::move(chunk));
     }
 
-    for (uint64_t offset : column_offsets) {
-        bio::WritePod(kio_file_, offset, "column offset");
+    for (const auto& chunk : chunks) {
+        bio::WritePod(kio_file_, chunk.local_offset);
     }
 
-    for (size_t col_idx = 0; col_idx < column_metas.size(); ++col_idx) {
-        const auto& meta = column_metas[col_idx];
-        const auto& payload = column_payloads[col_idx];
-        bio::WritePod(kio_file_, meta, "column chunk metadata");
-        bio::WriteBytes(kio_file_, payload.data(), payload.size(), "column payload");
+    for (const auto& chunk : chunks) {
+        bio::WritePod(kio_file_, chunk.meta);
+        bio::WriteBytes(kio_file_, chunk.payload.data(), chunk.payload.size());
     }
+
+    return column_infos;
 }
 
 void KioDbWriter::WriteBatchToFile(const ctp::ColumnarBatch& batch) {
+    if (finalized_) {
+        throw std::runtime_error("Cannot write to finalized KIO file");
+    }
+
     if (batch.empty()) {
         return;
     }
 
-    ctp::ValidateColumnarBatch(batch, schema_);
-    WriteBatchMeta(batch);
-    WriteColumns(batch);
+    ctp::ValidateColumnarBatch(batch, metadata_.schema);
+
+    kio::RowGroupMeta row_group;
+    row_group.batch = MakeBatchMeta(batch);
+    bio::WritePod(kio_file_, row_group.batch);
+    row_group.columns = WriteColumns(batch);
+
+    metadata_.row_count += row_group.batch.row_num;
+    metadata_.row_groups.push_back(std::move(row_group));
+}
+
+void KioDbWriter::WriteFooter() {
+    bio::WritePod(kio_file_, metadata_.row_count);
+
+    const uint64_t column_count = metadata_.schema.ColumnCount();
+    bio::WritePod(kio_file_, column_count);
+    for (uint64_t i = 0; i < column_count; ++i) {
+        WriteString(kio_file_, metadata_.schema.ColumnName(i));
+        const uint8_t type = metadata_.schema.ColumnType(i);
+        bio::WritePod(kio_file_, type);
+    }
+
+    const uint64_t row_group_count = metadata_.row_groups.size();
+    bio::WritePod(kio_file_, row_group_count);
+    for (const auto& row_group : metadata_.row_groups) {
+        bio::WritePod(kio_file_, row_group.batch);
+
+        const uint64_t chunk_count = row_group.columns.size();
+        bio::WritePod(kio_file_, chunk_count);
+        for (const auto& chunk : row_group.columns) {
+            bio::WritePod(kio_file_, chunk.local_offset);
+            bio::WritePod(kio_file_, chunk.compressed_size);
+            bio::WritePod(kio_file_, chunk.uncompressed_size);
+
+            const uint8_t encoding = static_cast<uint8_t>(chunk.encoding);
+            const uint8_t compression = static_cast<uint8_t>(chunk.compression);
+            const uint8_t has_min_max = chunk.has_min_max ? 1 : 0;
+            bio::WritePod(kio_file_, encoding);
+            bio::WritePod(kio_file_, compression);
+            bio::WritePod(kio_file_, has_min_max);
+            WriteString(kio_file_, chunk.min_value);
+            WriteString(kio_file_, chunk.max_value);
+        }
+    }
+}
+
+void KioDbWriter::Finalize() {
+    if (finalized_ || !kio_file_.is_open()) {
+        return;
+    }
+
+    const std::streampos footer_pos = kio_file_.tellp();
+    if (footer_pos == std::streampos(-1)) {
+        throw std::runtime_error("Failed to get footer position");
+    }
+
+    const uint64_t footer_offset = static_cast<uint64_t>(footer_pos);
+    WriteFooter();
+
+    const std::streampos end_pos = kio_file_.tellp();
+    kio_file_.seekp(kFooterOffsetPosition);
+    bio::WritePod(kio_file_, footer_offset);
+    kio_file_.seekp(end_pos);
+    kio_file_.flush();
+    finalized_ = true;
 }
