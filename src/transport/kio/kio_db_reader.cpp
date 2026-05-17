@@ -60,7 +60,8 @@ ctp::Column ReadFixedColumn(std::istream& input, uint64_t row_num,
     }
 
     std::vector<T> result(row_num);
-    bio::ReadBytes(input, reinterpret_cast<char*>(result.data()), expected_size);
+    bio::ReadBytes(input, reinterpret_cast<char*>(result.data()),
+                   expected_size);
     return result;
 }
 
@@ -68,19 +69,19 @@ ctp::Column ReadColumnByType(std::istream& input, uint64_t row_num,
                              const kio::ColumnChunkMeta& chunk_meta,
                              Schema::Types type) {
     switch (type) {
-    case Schema::BIGINT:
-    case Schema::TIMESTAMP:
-        return ReadFixedColumn<int64_t>(input, row_num, chunk_meta);
-    case Schema::INTEGER:
-    case Schema::DATE:
-        return ReadFixedColumn<int32_t>(input, row_num, chunk_meta);
-    case Schema::SMALLINT:
-        return ReadFixedColumn<int16_t>(input, row_num, chunk_meta);
-    case Schema::CHAR:
-        return ReadFixedColumn<char>(input, row_num, chunk_meta);
-    case Schema::TEXT:
-    case Schema::VARCHAR:
-        return ReadStringColumn(input, row_num, chunk_meta);
+        case Schema::BIGINT:
+        case Schema::TIMESTAMP:
+            return ReadFixedColumn<int64_t>(input, row_num, chunk_meta);
+        case Schema::INTEGER:
+        case Schema::DATE:
+            return ReadFixedColumn<int32_t>(input, row_num, chunk_meta);
+        case Schema::SMALLINT:
+            return ReadFixedColumn<int16_t>(input, row_num, chunk_meta);
+        case Schema::CHAR:
+            return ReadFixedColumn<char>(input, row_num, chunk_meta);
+        case Schema::TEXT:
+        case Schema::VARCHAR:
+            return ReadStringColumn(input, row_num, chunk_meta);
     }
 
     throw std::runtime_error("Unsupported schema type");
@@ -220,7 +221,8 @@ std::optional<KioReadBatch> KioDbReader::ReadNextBatch(
         return std::nullopt;
     }
 
-    const kio::RowGroupMeta& row_group = metadata_.row_groups[next_row_group_++];
+    const kio::RowGroupMeta& row_group =
+        metadata_.row_groups[next_row_group_++];
     ctp::ColumnarBatch batch;
     batch.reserve(column_indices.size());
 
@@ -238,9 +240,9 @@ std::optional<KioReadBatch> KioDbReader::ReadNextBatch(
             throw std::runtime_error("Failed to seek KIO column chunk");
         }
 
-        batch.emplace_back(ReadColumnFromFile(
-            kio_file_, row_group.batch.row_num,
-            metadata_.schema.ColumnType(col_idx)));
+        batch.emplace_back(
+            ReadColumnFromFile(kio_file_, row_group.batch.row_num,
+                               metadata_.schema.ColumnType(col_idx)));
     }
 
     return KioReadBatch{std::move(batch), row_group.batch.row_num};

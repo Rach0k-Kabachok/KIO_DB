@@ -1,10 +1,13 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_set>
+#include <variant>
 #include <vector>
 
 #include "global/columnar_types.h"
@@ -96,7 +99,56 @@ private:
 };
 
 
-class GlobalAgrOperator: public IOperator {
+class AggregateOperatorBase {
+protected:
+    explicit AggregateOperatorBase(const std::vector<AggregateSpec>& aggregates);
+    virtual ~AggregateOperatorBase() = default;
+
+    using DistinctSet = std::variant<
+        std::unordered_set<int64_t>,
+        std::unordered_set<int32_t>,
+        std::unordered_set<int16_t>,
+        std::unordered_set<std::string>,
+        std::unordered_set<char>,
+        std::unordered_set<unsigned char>>;
+
+    struct AggregateState {
+        size_t column_idx = 0;
+        Schema::Types input_type = Schema::BIGINT;
+        Schema::Types result_type = Schema::BIGINT;
+        ctp::Column result;
+        int64_t avg_count = 0;
+        DistinctSet distinct_values;
+    };
+
+    template<AggregateKind TYPE>
+    void ExecGlobalOperation(AggregateState& state,
+                             const ExecBatch& exec_batch);
+
+    template<AggregateKind TYPE>
+    void ExecGroupOperation(AggregateState& state,
+                            const ExecBatch& exec_batch,
+                            size_t row_idx);
+
+    std::vector<AggregateState> MakeAggregateStates(
+        const ExecBatch& first_batch,
+        std::vector<std::string>& result_names,
+        std::vector<Schema::Types>& result_types) const;
+
+    void ApplyAggregateOperation(size_t idx, AggregateState& state,
+                                 const ExecBatch& exec_batch);
+    void ApplyAggregateOperation(size_t idx, AggregateState& state,
+                                 const ExecBatch& exec_batch,
+                                 size_t row_idx);
+
+    ctp::ColumnarBatch FinalizeAggregation(
+        std::vector<AggregateState>& aggregate_states) const;
+
+    std::vector<AggregateSpec> aggregates_;
+};
+
+
+class GlobalAgrOperator: public IOperator, protected AggregateOperatorBase {
 public:
     GlobalAgrOperator(std::unique_ptr<IOperator> child_op,
                       const std::vector<AggregateSpec>& aggregates);
@@ -105,12 +157,11 @@ public:
     virtual ~GlobalAgrOperator() = default;
 private:
     std::unique_ptr<IOperator> child_op_;
-    std::vector<AggregateSpec> aggregates_;
     bool done_ = false;
 };
 
 
-class GroupAgrOperator: public IOperator {
+class GroupAgrOperator: public IOperator, protected AggregateOperatorBase {
 public:
     GroupAgrOperator(std::unique_ptr<IOperator> child_op,
                      const std::vector<std::string>& group_columns,
@@ -121,7 +172,6 @@ public:
 private:
     std::unique_ptr<IOperator> child_op_;
     std::vector<std::string> group_columns_;
-    std::vector<AggregateSpec> aggregates_;
     bool done_ = false;
 };
 

@@ -18,6 +18,9 @@ add_library(kio_core STATIC
         execution/filter_op.cpp
         execution/project_op.cpp
         execution/limit_op.cpp
+        execution/aggregate_operator_base.cpp
+        execution/global_agr_op.cpp
+        execution/group_agr_op.cpp
 
 )
 

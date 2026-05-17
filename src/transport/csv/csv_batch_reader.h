@@ -4,7 +4,7 @@
 #include <fstream>
 #include <string>
 
-#include "columnar_types.h"
+#include "global/columnar_types.h"
 
 class CSVBatchReader {
     static constexpr size_t kBatchSizeBytes = 64 * (1 << 20);  // 64 МБ
