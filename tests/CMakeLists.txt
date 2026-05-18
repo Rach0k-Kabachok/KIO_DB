@@ -4,6 +4,7 @@ add_executable(kio_db_tests
         csv_rw/csv_columnar_reader_test.cpp
         csv_rw/red_write_test.cpp
         csv_rw/hits_round_trip_test.cpp
+        compression/column_encoding_test.cpp
         execution/limit_op_test.cpp
         execution/aggregate_op_test.cpp
         execution/sort_op_test.cpp

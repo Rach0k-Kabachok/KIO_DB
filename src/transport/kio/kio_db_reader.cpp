@@ -11,13 +11,14 @@
 
 #include "global/columnar_types.h"
 #include "global/schema.h"
+#include "transport/compression/column_encoding.h"
 #include "transport/kio/binary_io.h"
 #include "transport/kio/kio_format.h"
 
 namespace {
 std::string ReadString(std::istream& input) {
     const uint64_t size = bio::ReadPod<uint64_t>(input);
-    std::string value(static_cast<size_t>(size), '\0');
+    std::string value(size, '\0');
     bio::ReadBytes(input, value.data(), size);
     return value;
 }
@@ -71,17 +72,17 @@ ctp::Column ReadColumnByType(std::istream& input, uint64_t row_num,
     switch (type) {
         case Schema::BIGINT:
         case Schema::TIMESTAMP:
-            return ReadFixedColumn<int64_t>(input, row_num, chunk_meta);
+            return ReadFixedColumn<int64_t>(input, row_num, chunk_size);
         case Schema::INTEGER:
         case Schema::DATE:
-            return ReadFixedColumn<int32_t>(input, row_num, chunk_meta);
+            return ReadFixedColumn<int32_t>(input, row_num, chunk_size);
         case Schema::SMALLINT:
-            return ReadFixedColumn<int16_t>(input, row_num, chunk_meta);
+            return ReadFixedColumn<int16_t>(input, row_num, chunk_size);
         case Schema::CHAR:
-            return ReadFixedColumn<char>(input, row_num, chunk_meta);
+            return ReadFixedColumn<char>(input, row_num, chunk_size);
         case Schema::TEXT:
         case Schema::VARCHAR:
-            return ReadStringColumn(input, row_num, chunk_meta);
+            return ReadStringColumn(input, row_num, chunk_size);
     }
 
     throw std::runtime_error("Unsupported schema type");
@@ -90,24 +91,13 @@ ctp::Column ReadColumnByType(std::istream& input, uint64_t row_num,
 ctp::Column ReadColumnFromFile(std::ifstream& file, uint64_t row_num,
                                Schema::Types type,
                                const kio::ColumnChunkInfo& chunk) {
-    return ReadColumnByType(file, row_num, chunk.size, type);
+    std::vector<char> payload(chunk.size);
+    bio::ReadBytes(file, payload.data(), chunk.size);
+    return DecodeColumnForRead(
+        payload, type, chunk.encoding, chunk.compression, row_num,
+        chunk.uncompressed_size);
 }
 
-kio::Encoding ReadEncoding(std::istream& input) {
-    const uint8_t encoding = bio::ReadPod<uint8_t>(input);
-    if (encoding != static_cast<uint8_t>(kio::Encoding::PLAIN)) {
-        throw std::runtime_error("Unsupported KIO encoding");
-    }
-    return kio::Encoding::PLAIN;
-}
-
-kio::Compression ReadCompression(std::istream& input) {
-    const uint8_t compression = bio::ReadPod<uint8_t>(input);
-    if (compression != static_cast<uint8_t>(kio::Compression::NONE)) {
-        throw std::runtime_error("Unsupported KIO compression");
-    }
-    return kio::Compression::NONE;
-}
 }  // namespace
 
 KioDbReader::KioDbReader(const std::string& db_filename)
@@ -179,7 +169,7 @@ void KioDbReader::ReadFooter(uint64_t footer_offset) {
 
     const uint64_t row_group_count = bio::ReadPod<uint64_t>(kio_file_);
     metadata_.row_groups.clear();
-    metadata_.row_groups.reserve(static_cast<size_t>(row_group_count));
+    metadata_.row_groups.reserve(row_group_count);
 
     for (uint64_t group_idx = 0; group_idx < row_group_count; ++group_idx) {
         kio::RowGroupMeta row_group;
@@ -191,15 +181,15 @@ void KioDbReader::ReadFooter(uint64_t footer_offset) {
                 "KIO footer chunk count does not match schema");
         }
 
-        row_group.columns.reserve(static_cast<size_t>(chunk_count));
+        row_group.columns.reserve(chunk_count);
         for (uint64_t chunk_idx = 0; chunk_idx < chunk_count; ++chunk_idx) {
             kio::ColumnChunkInfo chunk;
             chunk.local_offset = bio::ReadPod<uint64_t>(kio_file_);
             chunk.size = bio::ReadPod<uint64_t>(kio_file_);
             chunk.compressed_size = bio::ReadPod<uint64_t>(kio_file_);
             chunk.uncompressed_size = bio::ReadPod<uint64_t>(kio_file_);
-            chunk.encoding = ReadEncoding(kio_file_);
-            chunk.compression = ReadCompression(kio_file_);
+            chunk.encoding = bio::ReadPod<kio::Encoding>(kio_file_);
+            chunk.compression = bio::ReadPod<kio::Compression>(kio_file_);
             chunk.has_min_max = bio::ReadPod<uint8_t>(kio_file_) != 0;
             chunk.min_value = ReadString(kio_file_);
             chunk.max_value = ReadString(kio_file_);
@@ -246,7 +236,7 @@ std::optional<KioReadBatch> KioDbReader::ReadNextBatch(
 
         batch.emplace_back(
             ReadColumnFromFile(kio_file_, row_group.batch.row_num,
-                               metadata_.schema.ColumnType(col_idx)));
+                               metadata_.schema.ColumnType(col_idx), chunk));
     }
 
     return KioReadBatch{std::move(batch), row_group.batch.row_num};

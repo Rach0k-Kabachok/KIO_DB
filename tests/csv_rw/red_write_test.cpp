@@ -186,8 +186,11 @@ TEST(ReadWrite, StoresSelfContainedFooterMetadata) {
     ASSERT_EQ(metadata.row_groups.size(), 1u);
     EXPECT_EQ(metadata.row_groups[0].batch.row_num, 2u);
     ASSERT_EQ(metadata.row_groups[0].columns.size(), 2u);
-    EXPECT_EQ(metadata.row_groups[0].columns[0].encoding, kio::Encoding::PLAIN);
+    EXPECT_EQ(metadata.row_groups[0].columns[0].encoding,
+              kio::Encoding::DICTIONARY);
     EXPECT_EQ(metadata.row_groups[0].columns[0].compression, kio::Compression::NONE);
+    EXPECT_EQ(metadata.row_groups[0].columns[1].encoding,
+              kio::Encoding::DELTA);
     EXPECT_TRUE(metadata.row_groups[0].columns[1].has_min_max);
     EXPECT_EQ(metadata.row_groups[0].columns[1].min_value, "10");
     EXPECT_EQ(metadata.row_groups[0].columns[1].max_value, "20");

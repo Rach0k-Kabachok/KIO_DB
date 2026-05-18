@@ -147,6 +147,9 @@ protected:
     std::vector<AggregateSpec> aggregates_;
 };
 
+using AggregateKind = AggregateOperatorBase::AggregateKind;
+using AggregateSpec = AggregateOperatorBase::AggregateSpec;
+
 class GlobalAgrOperator: public IOperator, protected AggregateOperatorBase {
 public:
     GlobalAgrOperator(std::unique_ptr<IOperator> child_op,
@@ -208,6 +211,9 @@ protected:
 
     std::vector<SortKey> sort_keys_;
 };
+
+using SortOrder = SortOperatorBase::SortOrder;
+using SortKey = SortOperatorBase::SortKey;
 
 class SortOperator: public IOperator, protected SortOperatorBase {
 public:

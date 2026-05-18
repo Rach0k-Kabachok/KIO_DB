@@ -1,0 +1,139 @@
+#include <cstdint>
+#include <filesystem>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include "gtest/gtest.h"
+
+#include "global/columnar_types.h"
+#include "transport/compression/column_encoding.h"
+#include "transport/kio/kio_db_reader.h"
+#include "transport/kio/kio_db_writer.h"
+
+namespace {
+
+void ExpectRoundTrip(const ctp::Column& column, Schema::Types type,
+                     kio::Encoding encoding, uint64_t row_count) {
+    const IColumnEncoding& codec =
+        GetEncoding(encoding);
+    const std::vector<char> payload = codec.Encode(column, type);
+    EXPECT_EQ(codec.Decode(payload, type, row_count), column);
+}
+
+std::filesystem::path CompressionTestOutputPath(
+    const std::string& filename) {
+    return std::filesystem::temp_directory_path() / filename;
+}
+
+}  // namespace
+
+TEST(ColumnEncodingTest, RoundTripsPlain) {
+    ctp::Column column{std::vector<int64_t>{10, -2, 30}};
+    ExpectRoundTrip(column, Schema::BIGINT, kio::Encoding::PLAIN, 3);
+}
+
+TEST(ColumnEncodingTest, RoundTripsDelta) {
+    ctp::Column column{std::vector<int64_t>{100, 105, 103, 200}};
+    ExpectRoundTrip(column, Schema::BIGINT, kio::Encoding::DELTA, 4);
+}
+
+TEST(ColumnEncodingTest, RoundTripsDictionary) {
+    ctp::Column column{std::vector<std::string>{"a", "b", "a", "c"}};
+    ExpectRoundTrip(column, Schema::TEXT, kio::Encoding::DICTIONARY, 4);
+}
+
+TEST(ColumnEncodingTest, RoundTripsRle) {
+    ctp::Column column{std::vector<char>{'a', 'a', 'b', 'b', 'b', 'c'}};
+    ExpectRoundTrip(column, Schema::CHAR, kio::Encoding::RLE, 6);
+}
+
+TEST(ColumnEncodingTest, RoundTripsBitPacking) {
+    ctp::Column column{std::vector<int32_t>{0, 1, -1, 32, -32}};
+    ExpectRoundTrip(column, Schema::INTEGER, kio::Encoding::BIT_PACKING, 5);
+}
+
+TEST(ColumnEncodingTest, RoundTripsDeltaLengthByteArray) {
+    ctp::Column column{std::vector<std::string>{"", "alpha", "bb"}};
+    ExpectRoundTrip(
+        column, Schema::VARCHAR, kio::Encoding::DELTA_LENGTH_BYTE_ARRAY, 3);
+}
+
+TEST(ColumnEncodingTest, PrepareColumnUsesFixedMapping) {
+    ctp::Column numbers{std::vector<int32_t>{1, 2, 4}};
+    PreparedColumn number_prepared =
+        PrepareColumnForWrite(numbers, Schema::INTEGER);
+    EXPECT_EQ(number_prepared.encoding, kio::Encoding::DELTA);
+    EXPECT_EQ(number_prepared.compression, kio::Compression::NONE);
+    EXPECT_EQ(DecodeColumnForRead(
+                  number_prepared.payload, Schema::INTEGER,
+                  number_prepared.encoding, number_prepared.compression, 3,
+                  number_prepared.uncompressed_size),
+              numbers);
+
+    ctp::Column strings{std::vector<std::string>{"x", "x", "y"}};
+    PreparedColumn string_prepared =
+        PrepareColumnForWrite(strings, Schema::TEXT);
+    EXPECT_EQ(string_prepared.encoding, kio::Encoding::DICTIONARY);
+
+    ctp::Column chars{std::vector<char>{'q', 'q', 'z'}};
+    PreparedColumn char_prepared =
+        PrepareColumnForWrite(chars, Schema::CHAR);
+    EXPECT_EQ(char_prepared.encoding, kio::Encoding::RLE);
+}
+
+TEST(ColumnEncodingTest, KioRoundTripsEncodedColumnsAndMetadata) {
+    const std::filesystem::path path_db =
+        CompressionTestOutputPath("kio_db_encoded_columns_test.kiodb");
+
+    std::error_code ec;
+    std::filesystem::remove(path_db, ec);
+
+    Schema schema({
+        {"big", "BIGINT"},
+        {"integer", "INTEGER"},
+        {"small", "SMALLINT"},
+        {"text", "TEXT"},
+        {"varchar", "VARCHAR"},
+        {"ch", "CHAR"},
+        {"ts", "TIMESTAMP"},
+        {"date", "DATE"},
+    });
+
+    ctp::ColumnarBatch expected = {
+        ctp::Column{std::vector<int64_t>{100, 101, 110}},
+        ctp::Column{std::vector<int32_t>{1, 2, 3}},
+        ctp::Column{std::vector<int16_t>{4, 4, 5}},
+        ctp::Column{std::vector<std::string>{"alpha", "beta", "alpha"}},
+        ctp::Column{std::vector<std::string>{"x", "x", "y"}},
+        ctp::Column{std::vector<char>{'a', 'a', 'b'}},
+        ctp::Column{std::vector<int64_t>{1000, 1060, 1120}},
+        ctp::Column{std::vector<int32_t>{10, 11, 12}},
+    };
+
+    {
+        KioDbWriter writer(path_db.string(), schema);
+        writer.WriteBatchToFile(expected);
+    }
+
+    KioDbReader reader(path_db.string());
+    const kio::FileMetadata& metadata = reader.GetMetadata();
+    ASSERT_EQ(metadata.row_groups.size(), 1u);
+    ASSERT_EQ(metadata.row_groups[0].columns.size(), schema.ColumnCount());
+    EXPECT_EQ(metadata.row_groups[0].columns[0].encoding,
+              kio::Encoding::DELTA);
+    EXPECT_EQ(metadata.row_groups[0].columns[3].encoding,
+              kio::Encoding::DICTIONARY);
+    EXPECT_EQ(metadata.row_groups[0].columns[5].encoding,
+              kio::Encoding::RLE);
+    EXPECT_EQ(metadata.row_groups[0].columns[0].compression,
+              kio::Compression::NONE);
+
+    std::optional<KioReadBatch> actual = reader.ReadNextBatch();
+    ASSERT_TRUE(actual.has_value());
+    EXPECT_EQ(actual->columns, expected);
+    EXPECT_EQ(actual->row_count, 3u);
+    EXPECT_FALSE(reader.ReadNextBatch().has_value());
+
+    std::filesystem::remove(path_db, ec);
+}

@@ -11,9 +11,9 @@
 
 #include "column_operations.h"
 #include "columnar_types.h"
+#include "transport/compression/column_encoding.h"
 #include "transport/kio/binary_io.h"
 #include "transport/kio/kio_format.h"
-#include "transport/kio/kio_serialization.h"
 #include "schema.h"
 
 namespace {
@@ -58,17 +58,26 @@ kio::ColumnChunkInfo MakeStatsForValues(const std::vector<T>& values) {
 
 kio::ColumnChunkInfo MakeColumnInfo(const ctp::Column& column,
                                     uint64_t local_offset,
-                                    uint64_t payload_size) {
+                                    const PreparedColumn& prepared) {
     kio::ColumnChunkInfo info = std::visit(
         [](const auto& values) { return MakeStatsForValues(values); }, column);
 
     info.local_offset = local_offset;
-    info.size = payload_size;
-    info.compressed_size = payload_size;
-    info.uncompressed_size = payload_size;
-    info.encoding = kio::Encoding::PLAIN;
-    info.compression = kio::Compression::NONE;
+    info.size = prepared.payload.size();
+    info.compressed_size = prepared.compressed_size;
+    info.uncompressed_size = prepared.uncompressed_size;
+    info.encoding = prepared.encoding;
+    info.compression = prepared.compression;
     return info;
+}
+
+uint64_t GetEncodedBatchSize(
+    const std::vector<kio::ColumnChunkInfo>& columns) {
+    uint64_t result = sizeof(uint64_t) * columns.size();
+    for (const auto& column : columns) {
+        result += column.size;
+    }
+    return result;
 }
 }  // namespace
 
@@ -108,7 +117,7 @@ kio::BatchMeta KioDbWriter::MakeBatchMeta(const ctp::ColumnarBatch& batch) {
     batch_meta.col_num = batch.size();
     batch_meta.batch_start_offset =
         static_cast<uint64_t>(batch_meta_pos) + sizeof(kio::BatchMeta);
-    batch_meta.batch_size = kio::GetBatchPayloadSize(batch);
+    batch_meta.batch_size = 0;
 
     return batch_meta;
 }
@@ -127,11 +136,12 @@ std::vector<kio::ColumnChunkInfo> KioDbWriter::WriteColumns(
         const auto& column = batch[col_idx];
         const Schema::Types col_type = metadata_.schema.ColumnType(col_idx);
 
-        std::vector<char> payload = kio::SerializeColumn(column, col_type);
+        PreparedColumn prepared =
+            PrepareColumnForWrite(column, col_type);
         SerializedColumnChunk chunk;
         chunk.local_offset = column_offset;
-        chunk.info = MakeColumnInfo(column, column_offset, payload.size());
-        chunk.payload = std::move(payload);
+        chunk.info = MakeColumnInfo(column, column_offset, prepared);
+        chunk.payload = std::move(prepared.payload);
         column_offset += chunk.info.size;
         column_infos.push_back(std::move(chunk.info));
         chunks.push_back(std::move(chunk));
@@ -161,6 +171,13 @@ void KioDbWriter::WriteBatchToFile(const ctp::ColumnarBatch& batch) {
     row_group.batch = MakeBatchMeta(batch);
     bio::WritePod(kio_file_, row_group.batch);
     row_group.columns = WriteColumns(batch);
+    row_group.batch.batch_size = GetEncodedBatchSize(row_group.columns);
+
+    const std::streampos end_pos = kio_file_.tellp();
+    kio_file_.seekp(static_cast<std::streamoff>(
+        row_group.batch.batch_start_offset - sizeof(kio::BatchMeta)));
+    bio::WritePod(kio_file_, row_group.batch);
+    kio_file_.seekp(end_pos);
 
     metadata_.row_count += row_group.batch.row_num;
     metadata_.row_groups.push_back(std::move(row_group));

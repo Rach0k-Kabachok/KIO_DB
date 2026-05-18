@@ -11,6 +11,11 @@ inline constexpr char kMagic[4] = {'K', 'I', 'O', 'D'};
 
 enum class Encoding : uint8_t {
     PLAIN = 0,
+    RLE = 1,
+    DICTIONARY = 2,
+    BIT_PACKING = 3,
+    DELTA = 4,
+    DELTA_LENGTH_BYTE_ARRAY = 5,
 };
 
 enum class Compression : uint8_t {

@@ -4,6 +4,16 @@ add_library(kio_core STATIC
         transport/csv/csv_columnar_reader.cpp
         transport/csv/csv_exporter.cpp
 
+        transport/compression/bit_packing_encoding.cpp
+        transport/compression/column_encoding.cpp
+        transport/compression/compression_codec.cpp
+        transport/compression/delta_encoding.cpp
+        transport/compression/delta_length_byte_array_encoding.cpp
+        transport/compression/dictionary_encoding.cpp
+        transport/compression/none_compression.cpp
+        transport/compression/plain_encoding.cpp
+        transport/compression/rle_encoding.cpp
+
         transport/kio/kio_db_importer.cpp
         transport/kio/kio_db_reader.cpp
         transport/kio/kio_db_writer.cpp
@@ -11,7 +21,6 @@ add_library(kio_core STATIC
 
         global/kio_db.cpp
         global/schema.cpp
-        global/columnar_batch.cpp
         global/column_operations.cpp
 
         execution/table_scan_op.cpp
