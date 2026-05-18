@@ -23,6 +23,7 @@ TableScanOperator::TableScanOperator(
 
 
 std::optional<ExecBatch> TableScanOperator::Next() {
+    
     std::optional<KioReadBatch> batch = reader_.ReadNextBatch(column_indices_);
     if (!batch.has_value()) {
         return std::nullopt;
