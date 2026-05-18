@@ -7,7 +7,7 @@
 namespace kio {
 
 size_t GetColumnPayloadSize(const ctp::Column& column) {
-    size_t result = sizeof(ColumnChunkMeta);
+    size_t result = 0;
 
     std::visit([&result](const auto& values) {
         using Values = std::decay_t<decltype(values)>;
@@ -58,7 +58,7 @@ std::vector<char> SerializeStringColumn(
     return result;
 }
 
-std::pair<ColumnChunkMeta, std::vector<char>> SerializeColumn(
+std::vector<char> SerializeColumn(
     const ctp::Column& column, Schema::Types type) {
     std::vector<char> payload;
 
@@ -87,9 +87,7 @@ std::pair<ColumnChunkMeta, std::vector<char>> SerializeColumn(
         throw std::invalid_argument("Unsupported column type");
     }
 
-    ColumnChunkMeta meta;
-    meta.size = payload.size();
-    return {meta, payload};
+    return payload;
 }
 
 }  // namespace kio

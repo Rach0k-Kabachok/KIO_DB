@@ -6,7 +6,6 @@
 #include <optional>
 #include <utility>
 #include <variant>
-#include <vector>
 
 #include "global/columnar_types.h"
 

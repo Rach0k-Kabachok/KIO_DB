@@ -20,11 +20,14 @@ public:
 
     const Schema& GetSchema() const;
     const kio::FileMetadata& GetMetadata() const;
+    const kio::RowGroupMeta& GetRowGroupMeta(size_t group_idx) const;
 
     std::optional<KioReadBatch> ReadNextBatch();
 
     std::optional<KioReadBatch> ReadNextBatch(
         const std::vector<size_t>& column_indices);
+
+    void SkipNextBatch();
 
 private:
     void Reset();

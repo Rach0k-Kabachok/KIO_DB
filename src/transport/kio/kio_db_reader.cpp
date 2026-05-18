@@ -23,7 +23,7 @@ std::string ReadString(std::istream& input) {
 }
 
 ctp::Column ReadStringColumn(std::istream& input, uint64_t row_num,
-                             const kio::ColumnChunkMeta& chunk_meta) {
+                             uint64_t chunk_size) {
     std::vector<std::string> result;
     result.reserve(row_num);
 
@@ -36,7 +36,7 @@ ctp::Column ReadStringColumn(std::istream& input, uint64_t row_num,
     for (const auto& sz : str_sizes) {
         strings_size += sz;
     }
-    if (sizes_bytes + strings_size != chunk_meta.size) {
+    if (sizes_bytes + strings_size != chunk_size) {
         throw std::runtime_error(
             "Corrupted KIO batch: string column size mismatch");
     }
@@ -52,46 +52,45 @@ ctp::Column ReadStringColumn(std::istream& input, uint64_t row_num,
 
 template <typename T>
 ctp::Column ReadFixedColumn(std::istream& input, uint64_t row_num,
-                            const kio::ColumnChunkMeta& chunk_meta) {
+                            uint64_t chunk_size) {
     const uint64_t expected_size = row_num * sizeof(T);
-    if (chunk_meta.size != expected_size) {
+    if (chunk_size != expected_size) {
         throw std::runtime_error(
             "Corrupted KIO batch: fixed column size mismatch");
     }
 
     std::vector<T> result(row_num);
-    bio::ReadBytes(input, reinterpret_cast<char*>(result.data()), expected_size);
+    bio::ReadBytes(input, reinterpret_cast<char*>(result.data()),
+                   expected_size);
     return result;
 }
 
 ctp::Column ReadColumnByType(std::istream& input, uint64_t row_num,
-                             const kio::ColumnChunkMeta& chunk_meta,
+                             uint64_t chunk_size,
                              Schema::Types type) {
     switch (type) {
-    case Schema::BIGINT:
-    case Schema::TIMESTAMP:
-        return ReadFixedColumn<int64_t>(input, row_num, chunk_meta);
-    case Schema::INTEGER:
-    case Schema::DATE:
-        return ReadFixedColumn<int32_t>(input, row_num, chunk_meta);
-    case Schema::SMALLINT:
-        return ReadFixedColumn<int16_t>(input, row_num, chunk_meta);
-    case Schema::CHAR:
-        return ReadFixedColumn<char>(input, row_num, chunk_meta);
-    case Schema::TEXT:
-    case Schema::VARCHAR:
-        return ReadStringColumn(input, row_num, chunk_meta);
+        case Schema::BIGINT:
+        case Schema::TIMESTAMP:
+            return ReadFixedColumn<int64_t>(input, row_num, chunk_meta);
+        case Schema::INTEGER:
+        case Schema::DATE:
+            return ReadFixedColumn<int32_t>(input, row_num, chunk_meta);
+        case Schema::SMALLINT:
+            return ReadFixedColumn<int16_t>(input, row_num, chunk_meta);
+        case Schema::CHAR:
+            return ReadFixedColumn<char>(input, row_num, chunk_meta);
+        case Schema::TEXT:
+        case Schema::VARCHAR:
+            return ReadStringColumn(input, row_num, chunk_meta);
     }
 
     throw std::runtime_error("Unsupported schema type");
 }
 
 ctp::Column ReadColumnFromFile(std::ifstream& file, uint64_t row_num,
-                               Schema::Types type) {
-    const kio::ColumnChunkMeta chunk_meta =
-        bio::ReadPod<kio::ColumnChunkMeta>(file);
-
-    return ReadColumnByType(file, row_num, chunk_meta, type);
+                               Schema::Types type,
+                               const kio::ColumnChunkInfo& chunk) {
+    return ReadColumnByType(file, row_num, chunk.size, type);
 }
 
 kio::Encoding ReadEncoding(std::istream& input) {
@@ -128,6 +127,11 @@ const Schema& KioDbReader::GetSchema() const {
 const kio::FileMetadata& KioDbReader::GetMetadata() const {
     return metadata_;
 }
+
+const kio::RowGroupMeta& KioDbReader::GetRowGroupMeta(size_t group_idx) const {
+    return metadata_.row_groups[group_idx];
+}
+
 
 void KioDbReader::Reset() {
     kio_file_.clear();
@@ -191,6 +195,7 @@ void KioDbReader::ReadFooter(uint64_t footer_offset) {
         for (uint64_t chunk_idx = 0; chunk_idx < chunk_count; ++chunk_idx) {
             kio::ColumnChunkInfo chunk;
             chunk.local_offset = bio::ReadPod<uint64_t>(kio_file_);
+            chunk.size = bio::ReadPod<uint64_t>(kio_file_);
             chunk.compressed_size = bio::ReadPod<uint64_t>(kio_file_);
             chunk.uncompressed_size = bio::ReadPod<uint64_t>(kio_file_);
             chunk.encoding = ReadEncoding(kio_file_);
@@ -220,7 +225,8 @@ std::optional<KioReadBatch> KioDbReader::ReadNextBatch(
         return std::nullopt;
     }
 
-    const kio::RowGroupMeta& row_group = metadata_.row_groups[next_row_group_++];
+    const kio::RowGroupMeta& row_group =
+        metadata_.row_groups[next_row_group_++];
     ctp::ColumnarBatch batch;
     batch.reserve(column_indices.size());
 
@@ -238,10 +244,16 @@ std::optional<KioReadBatch> KioDbReader::ReadNextBatch(
             throw std::runtime_error("Failed to seek KIO column chunk");
         }
 
-        batch.emplace_back(ReadColumnFromFile(
-            kio_file_, row_group.batch.row_num,
-            metadata_.schema.ColumnType(col_idx)));
+        batch.emplace_back(
+            ReadColumnFromFile(kio_file_, row_group.batch.row_num,
+                               metadata_.schema.ColumnType(col_idx)));
     }
 
     return KioReadBatch{std::move(batch), row_group.batch.row_num};
+}
+
+void KioDbReader::SkipNextBatch() {
+    if (next_row_group_ < metadata_.row_groups.size()) {
+        next_row_group_++;
+    }
 }
