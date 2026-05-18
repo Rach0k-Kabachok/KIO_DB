@@ -17,12 +17,9 @@ enum class Compression : uint8_t {
     NONE = 0,
 };
 
-struct ColumnChunkMeta {
-    uint64_t size;
-};
-
 struct ColumnChunkInfo {
     uint64_t local_offset = 0;
+    uint64_t size = 0;
     uint64_t compressed_size = 0;
     uint64_t uncompressed_size = 0;
     Encoding encoding = Encoding::PLAIN;

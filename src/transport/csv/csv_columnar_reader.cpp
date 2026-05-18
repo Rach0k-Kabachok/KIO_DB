@@ -7,7 +7,6 @@
 #include <utility>
 #include <vector>
 
-#include "columnar_batch.h"
 #include "transport/csv/csv_type_parser.h"
 
 namespace {
@@ -150,6 +149,5 @@ ctp::ColumnarBatch CSVColumnarReader::MakeColumnarBatch() {
 
     ctp::ColumnarBatch batch = MakeEmptyBatch(buffer.size() / 128 + 1);
     ParseBuffer(std::move(buffer), batch);
-    ctp::ValidateColumnarBatch(batch, schema_);
     return batch;
 }
