@@ -21,16 +21,16 @@ using DistinctSet = std::variant<
     std::unordered_set<char>,
     std::unordered_set<unsigned char>>;
 
-Schema::Types InferAggregateResultType(AggregateKind kind,
+Schema::Types InferAggregateResultType(AggregateOperatorBase::AggregateKind kind,
                                        Schema::Types input_type) {
     switch (kind) {
-    case AggregateKind::COUNT:
-    case AggregateKind::SUM:
-    case AggregateKind::AVG:
-    case AggregateKind::COUNT_DISTINCT:
+    case AggregateOperatorBase::AggregateKind::COUNT:
+    case AggregateOperatorBase::AggregateKind::SUM:
+    case AggregateOperatorBase::AggregateKind::AVG:
+    case AggregateOperatorBase::AggregateKind::COUNT_DISTINCT:
         return Schema::BIGINT;
-    case AggregateKind::MIN:
-    case AggregateKind::MAX:
+    case AggregateOperatorBase::AggregateKind::MIN:
+    case AggregateOperatorBase::AggregateKind::MAX:
         return input_type;
     }
     throw std::invalid_argument("wrong type of operation");
@@ -69,14 +69,14 @@ AggregateOperatorBase::AggregateOperatorBase(
 }
 
 template<>
-void AggregateOperatorBase::ExecGlobalOperation<AggregateKind::COUNT>(
+void AggregateOperatorBase::ExecGlobalOperation<AggregateOperatorBase::AggregateKind::COUNT>(
         AggregateState& state, const ExecBatch& exec_batch) {
     std::get<std::vector<int64_t>>(state.result)[0] +=
         static_cast<int64_t>(exec_batch.row_count);
 }
 
 template<>
-void AggregateOperatorBase::ExecGlobalOperation<AggregateKind::SUM>(
+void AggregateOperatorBase::ExecGlobalOperation<AggregateOperatorBase::AggregateKind::SUM>(
         AggregateState& state, const ExecBatch& exec_batch) {
     std::vector<int64_t>& result_values =
         std::get<std::vector<int64_t>>(state.result);
@@ -93,14 +93,14 @@ void AggregateOperatorBase::ExecGlobalOperation<AggregateKind::SUM>(
 }
 
 template<>
-void AggregateOperatorBase::ExecGlobalOperation<AggregateKind::AVG>(
+void AggregateOperatorBase::ExecGlobalOperation<AggregateOperatorBase::AggregateKind::AVG>(
         AggregateState& state, const ExecBatch& exec_batch) {
-    ExecGlobalOperation<AggregateKind::SUM>(state, exec_batch);
+    ExecGlobalOperation<AggregateOperatorBase::AggregateKind::SUM>(state, exec_batch);
     state.avg_count += static_cast<int64_t>(exec_batch.row_count);
 }
 
 template<>
-void AggregateOperatorBase::ExecGlobalOperation<AggregateKind::MIN>(
+void AggregateOperatorBase::ExecGlobalOperation<AggregateOperatorBase::AggregateKind::MIN>(
         AggregateState& state, const ExecBatch& exec_batch) {
     const ctp::Column& input = exec_batch.columns[state.column_idx];
 
@@ -122,7 +122,7 @@ void AggregateOperatorBase::ExecGlobalOperation<AggregateKind::MIN>(
 }
 
 template<>
-void AggregateOperatorBase::ExecGlobalOperation<AggregateKind::MAX>(
+void AggregateOperatorBase::ExecGlobalOperation<AggregateOperatorBase::AggregateKind::MAX>(
         AggregateState& state, const ExecBatch& exec_batch) {
     const ctp::Column& input = exec_batch.columns[state.column_idx];
 
@@ -144,7 +144,7 @@ void AggregateOperatorBase::ExecGlobalOperation<AggregateKind::MAX>(
 }
 
 template<>
-void AggregateOperatorBase::ExecGlobalOperation<AggregateKind::COUNT_DISTINCT>(
+void AggregateOperatorBase::ExecGlobalOperation<AggregateOperatorBase::AggregateKind::COUNT_DISTINCT>(
         AggregateState& state, const ExecBatch& exec_batch) {
     const ctp::Column& input = exec_batch.columns[state.column_idx];
 
@@ -161,13 +161,13 @@ void AggregateOperatorBase::ExecGlobalOperation<AggregateKind::COUNT_DISTINCT>(
 
 
 template<>
-void AggregateOperatorBase::ExecGroupOperation<AggregateKind::COUNT>(
+void AggregateOperatorBase::ExecGroupOperation<AggregateOperatorBase::AggregateKind::COUNT>(
         AggregateState& state, const ExecBatch& exec_batch, size_t row_idx) {
     std::get<std::vector<int64_t>>(state.result)[0]++;
 }
 
 template<>
-void AggregateOperatorBase::ExecGroupOperation<AggregateKind::SUM>(
+void AggregateOperatorBase::ExecGroupOperation<AggregateOperatorBase::AggregateKind::SUM>(
         AggregateState& state, const ExecBatch& exec_batch, size_t row_idx) {
 
     std::vector<int64_t>& result_values =
@@ -183,14 +183,14 @@ void AggregateOperatorBase::ExecGroupOperation<AggregateKind::SUM>(
 }
 
 template<>
-void AggregateOperatorBase::ExecGroupOperation<AggregateKind::AVG>(
+void AggregateOperatorBase::ExecGroupOperation<AggregateOperatorBase::AggregateKind::AVG>(
         AggregateState& state, const ExecBatch& exec_batch, size_t row_idx) {
-    ExecGroupOperation<AggregateKind::SUM>(state, exec_batch, row_idx);
+    ExecGroupOperation<AggregateOperatorBase::AggregateKind::SUM>(state, exec_batch, row_idx);
     state.avg_count++;
 }
 
 template<>
-void AggregateOperatorBase::ExecGroupOperation<AggregateKind::MIN>(
+void AggregateOperatorBase::ExecGroupOperation<AggregateOperatorBase::AggregateKind::MIN>(
         AggregateState& state, const ExecBatch& exec_batch, size_t row_idx) {
     const ctp::Column& input = exec_batch.columns[state.column_idx];
 
@@ -211,7 +211,7 @@ void AggregateOperatorBase::ExecGroupOperation<AggregateKind::MIN>(
 }
 
 template<>
-void AggregateOperatorBase::ExecGroupOperation<AggregateKind::MAX>(
+void AggregateOperatorBase::ExecGroupOperation<AggregateOperatorBase::AggregateKind::MAX>(
         AggregateState& state, const ExecBatch& exec_batch, size_t row_idx) {
     const ctp::Column& input = exec_batch.columns[state.column_idx];
 
@@ -232,7 +232,7 @@ void AggregateOperatorBase::ExecGroupOperation<AggregateKind::MAX>(
 }
 
 template<>
-void AggregateOperatorBase::ExecGroupOperation<AggregateKind::COUNT_DISTINCT>(
+void AggregateOperatorBase::ExecGroupOperation<AggregateOperatorBase::AggregateKind::COUNT_DISTINCT>(
         AggregateState& state, const ExecBatch& exec_batch, size_t row_idx) {
     const ctp::Column& input = exec_batch.columns[state.column_idx];
 
@@ -259,7 +259,7 @@ AggregateOperatorBase::MakeAggregateStates(
 
     for (const AggregateSpec& aggregate : aggregates_) {
         AggregateState state;
-        if (aggregate.kind != AggregateKind::COUNT) {
+        if (aggregate.kind != AggregateOperatorBase::AggregateKind::COUNT) {
             state.column_idx =
                 first_batch.schema->ColumnIndex(aggregate.column_name);
             state.input_type = first_batch.schema->ColumnType(state.column_idx);
@@ -272,14 +272,14 @@ AggregateOperatorBase::MakeAggregateStates(
         result_names.push_back(aggregate.result_name);
         result_types.push_back(state.result_type);
 
-        if (aggregate.kind == AggregateKind::COUNT ||
-            aggregate.kind == AggregateKind::SUM ||
-            aggregate.kind == AggregateKind::AVG ||
-            aggregate.kind == AggregateKind::COUNT_DISTINCT) {
+        if (aggregate.kind == AggregateOperatorBase::AggregateKind::COUNT ||
+            aggregate.kind == AggregateOperatorBase::AggregateKind::SUM ||
+            aggregate.kind == AggregateOperatorBase::AggregateKind::AVG ||
+            aggregate.kind == AggregateOperatorBase::AggregateKind::COUNT_DISTINCT) {
             std::get<std::vector<int64_t>>(state.result).push_back(0);
         }
 
-        if (aggregate.kind == AggregateKind::COUNT_DISTINCT) {
+        if (aggregate.kind == AggregateOperatorBase::AggregateKind::COUNT_DISTINCT) {
             state.distinct_values = MakeDistinctSet(state.input_type);
         }
 
@@ -293,18 +293,18 @@ void AggregateOperatorBase::ApplyAggregateOperation(
         size_t idx, AggregateState& state, const ExecBatch& exec_batch) {
     const AggregateSpec& aggregate = aggregates_[idx];
     
-    if (aggregate.kind == AggregateKind::COUNT) {
-        ExecGlobalOperation<AggregateKind::COUNT>(state, exec_batch);
-    } else if (aggregate.kind == AggregateKind::SUM) {
-        ExecGlobalOperation<AggregateKind::SUM>(state, exec_batch);
-    } else if (aggregate.kind == AggregateKind::AVG) {
-        ExecGlobalOperation<AggregateKind::AVG>(state, exec_batch);
-    } else if (aggregate.kind == AggregateKind::MIN) {
-        ExecGlobalOperation<AggregateKind::MIN>(state, exec_batch);
-    } else if (aggregate.kind == AggregateKind::MAX) {
-        ExecGlobalOperation<AggregateKind::MAX>(state, exec_batch);
-    } else if (aggregate.kind == AggregateKind::COUNT_DISTINCT) {
-        ExecGlobalOperation<AggregateKind::COUNT_DISTINCT>(state, exec_batch);
+    if (aggregate.kind == AggregateOperatorBase::AggregateKind::COUNT) {
+        ExecGlobalOperation<AggregateOperatorBase::AggregateKind::COUNT>(state, exec_batch);
+    } else if (aggregate.kind == AggregateOperatorBase::AggregateKind::SUM) {
+        ExecGlobalOperation<AggregateOperatorBase::AggregateKind::SUM>(state, exec_batch);
+    } else if (aggregate.kind == AggregateOperatorBase::AggregateKind::AVG) {
+        ExecGlobalOperation<AggregateOperatorBase::AggregateKind::AVG>(state, exec_batch);
+    } else if (aggregate.kind == AggregateOperatorBase::AggregateKind::MIN) {
+        ExecGlobalOperation<AggregateOperatorBase::AggregateKind::MIN>(state, exec_batch);
+    } else if (aggregate.kind == AggregateOperatorBase::AggregateKind::MAX) {
+        ExecGlobalOperation<AggregateOperatorBase::AggregateKind::MAX>(state, exec_batch);
+    } else if (aggregate.kind == AggregateOperatorBase::AggregateKind::COUNT_DISTINCT) {
+        ExecGlobalOperation<AggregateOperatorBase::AggregateKind::COUNT_DISTINCT>(state, exec_batch);
     } else {
         throw std::invalid_argument("wrong type of operation");
     }
@@ -315,18 +315,18 @@ void AggregateOperatorBase::ApplyAggregateOperation(
         size_t row_idx) {
     const AggregateSpec& aggregate = aggregates_[idx];
 
-    if (aggregate.kind == AggregateKind::COUNT) {
-        ExecGroupOperation<AggregateKind::COUNT>(state, exec_batch, row_idx);
-    } else if (aggregate.kind == AggregateKind::SUM) {
-        ExecGroupOperation<AggregateKind::SUM>(state, exec_batch, row_idx);
-    } else if (aggregate.kind == AggregateKind::AVG) {
-        ExecGroupOperation<AggregateKind::AVG>(state, exec_batch, row_idx);
-    } else if (aggregate.kind == AggregateKind::MIN) {
-        ExecGroupOperation<AggregateKind::MIN>(state, exec_batch, row_idx);
-    } else if (aggregate.kind == AggregateKind::MAX) {
-        ExecGroupOperation<AggregateKind::MAX>(state, exec_batch, row_idx);
-    } else if (aggregate.kind == AggregateKind::COUNT_DISTINCT) {
-        ExecGroupOperation<AggregateKind::COUNT_DISTINCT>(
+    if (aggregate.kind == AggregateOperatorBase::AggregateKind::COUNT) {
+        ExecGroupOperation<AggregateOperatorBase::AggregateKind::COUNT>(state, exec_batch, row_idx);
+    } else if (aggregate.kind == AggregateOperatorBase::AggregateKind::SUM) {
+        ExecGroupOperation<AggregateOperatorBase::AggregateKind::SUM>(state, exec_batch, row_idx);
+    } else if (aggregate.kind == AggregateOperatorBase::AggregateKind::AVG) {
+        ExecGroupOperation<AggregateOperatorBase::AggregateKind::AVG>(state, exec_batch, row_idx);
+    } else if (aggregate.kind == AggregateOperatorBase::AggregateKind::MIN) {
+        ExecGroupOperation<AggregateOperatorBase::AggregateKind::MIN>(state, exec_batch, row_idx);
+    } else if (aggregate.kind == AggregateOperatorBase::AggregateKind::MAX) {
+        ExecGroupOperation<AggregateOperatorBase::AggregateKind::MAX>(state, exec_batch, row_idx);
+    } else if (aggregate.kind == AggregateOperatorBase::AggregateKind::COUNT_DISTINCT) {
+        ExecGroupOperation<AggregateOperatorBase::AggregateKind::COUNT_DISTINCT>(
             state, exec_batch, row_idx);
     } else {
         throw std::invalid_argument("wrong type of operation");
@@ -336,11 +336,11 @@ void AggregateOperatorBase::ApplyAggregateOperation(
 ctp::ColumnarBatch AggregateOperatorBase::FinalizeAggregation(
         std::vector<AggregateState>& aggregate_states) const {
     for (size_t idx = 0; idx < aggregates_.size(); idx++) {
-        if (aggregates_[idx].kind == AggregateKind::AVG &&
+        if (aggregates_[idx].kind == AggregateOperatorBase::AggregateKind::AVG &&
             aggregate_states[idx].avg_count != 0) {
             std::get<std::vector<int64_t>>(aggregate_states[idx].result)[0] /=
                 aggregate_states[idx].avg_count;
-        } else if (aggregates_[idx].kind == AggregateKind::COUNT_DISTINCT) {
+        } else if (aggregates_[idx].kind == AggregateOperatorBase::AggregateKind::COUNT_DISTINCT) {
             std::get<std::vector<int64_t>>(aggregate_states[idx].result)[0] =
                 DistinctCount(aggregate_states[idx].distinct_values);
         }

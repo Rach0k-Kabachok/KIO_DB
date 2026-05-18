@@ -130,6 +130,11 @@ const kio::FileMetadata& KioDbReader::GetMetadata() const {
     return metadata_;
 }
 
+const kio::RowGroupMeta& KioDbReader::GetRowGroupMeta(size_t group_idx) const {
+    return metadata_.row_groups[group_idx];
+}
+
+
 void KioDbReader::Reset() {
     kio_file_.clear();
     next_row_group_ = 0;
@@ -246,4 +251,10 @@ std::optional<KioReadBatch> KioDbReader::ReadNextBatch(
     }
 
     return KioReadBatch{std::move(batch), row_group.batch.row_num};
+}
+
+void KioDbReader::SkipNextBatch() {
+    if (next_row_group_ < metadata_.row_groups.size()) {
+        next_row_group_++;
+    }
 }

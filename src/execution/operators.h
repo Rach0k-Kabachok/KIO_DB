@@ -14,40 +14,14 @@
 #include "global/schema.h"
 #include "transport/kio/kio_db_reader.h"
 
+
 struct ExecBatch {
     ctp::ColumnarBatch columns;
     std::shared_ptr<const Schema> schema;
     size_t row_count = 0;
 };
 
-enum class AggregateKind {
-    COUNT,
-    SUM,
-    AVG,
-    MIN,
-    MAX,
-    COUNT_DISTINCT
-};
-
-enum class SortOrder {
-    ASC,
-    DESC
-};
-
-struct AggregateSpec {
-    AggregateKind kind;
-    std::string column_name;
-    std::string result_name;
-    Schema::Types result_type = Schema::BIGINT;
-};
-
-struct SortKey {
-    std::string column_name;
-    SortOrder order = SortOrder::ASC;
-};
-
 using VarType = std::variant<
-    size_t,
     int64_t,
     int32_t,
     int16_t,
@@ -56,9 +30,6 @@ using VarType = std::variant<
     unsigned char>;
 
 using VarVector = std::vector<VarType>;
-
-using RowPredicate = std::function<bool(const ExecBatch& batch, size_t row_idx)>;
-
 
 class IOperator {
 public:
@@ -84,6 +55,8 @@ private:
 
 class FilterOperator: public IOperator {
 public:
+    using RowPredicate = std::function<bool(const ExecBatch& batch, size_t row_idx)>;
+
     FilterOperator(std::unique_ptr<IOperator> child_op,
                    RowPredicate predicate);
 
@@ -111,10 +84,7 @@ private:
 
 
 class AggregateOperatorBase {
-protected:
-    explicit AggregateOperatorBase(const std::vector<AggregateSpec>& aggregates);
-    virtual ~AggregateOperatorBase() = default;
-
+public:
     using DistinctSet = std::variant<
         std::unordered_set<int64_t>,
         std::unordered_set<int32_t>,
@@ -122,6 +92,22 @@ protected:
         std::unordered_set<std::string>,
         std::unordered_set<char>,
         std::unordered_set<unsigned char>>;
+    
+    enum class AggregateKind {
+        COUNT,
+        SUM,
+        AVG,
+        MIN,
+        MAX,
+        COUNT_DISTINCT
+    };
+
+    struct AggregateSpec {
+        AggregateKind kind;
+        std::string column_name;
+        std::string result_name;
+        Schema::Types result_type = Schema::BIGINT;
+    };
 
     struct AggregateState {
         size_t column_idx = 0;
@@ -131,6 +117,9 @@ protected:
         int64_t avg_count = 0;
         DistinctSet distinct_values;
     };
+protected:
+    explicit AggregateOperatorBase(const std::vector<AggregateSpec>& aggregates);
+    virtual ~AggregateOperatorBase() = default;
 
     template<AggregateKind TYPE>
     void ExecGlobalOperation(AggregateState& state,
@@ -157,7 +146,6 @@ protected:
 
     std::vector<AggregateSpec> aggregates_;
 };
-
 
 class GlobalAgrOperator: public IOperator, protected AggregateOperatorBase {
 public:
@@ -188,6 +176,17 @@ private:
 
 
 class SortOperatorBase {
+public:
+    enum class SortOrder {
+        ASC,
+        DESC
+    };
+
+    struct SortKey {
+        std::string column_name;
+        SortOrder order = SortOrder::ASC;
+    };
+
 protected:
     explicit SortOperatorBase(const std::vector<SortKey>& sort_keys);
     virtual ~SortOperatorBase() = default;
@@ -209,7 +208,6 @@ protected:
 
     std::vector<SortKey> sort_keys_;
 };
-
 
 class SortOperator: public IOperator, protected SortOperatorBase {
 public:
