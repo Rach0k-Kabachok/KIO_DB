@@ -6,6 +6,8 @@ add_executable(kio_db_tests
         csv_rw/hits_round_trip_test.cpp
         execution/limit_op_test.cpp
         execution/aggregate_op_test.cpp
+        execution/sort_op_test.cpp
+        execution/top_k_op_test.cpp
 )
 
 target_link_libraries(kio_db_tests PRIVATE kio_core GTest::gtest_main)

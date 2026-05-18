@@ -17,22 +17,12 @@
 
 namespace {
 
-using GroupValue = std::variant<
-    int64_t,
-    int32_t,
-    int16_t,
-    std::string,
-    char,
-    unsigned char>;
-
-using GroupKey = std::vector<GroupValue>;
-
 size_t HashCombine(size_t seed, size_t value) {
     return seed ^ (value + 0x9e3779b9 + (seed << 6) + (seed >> 2));
 }
 
-struct GroupValueHash {
-    size_t operator()(const GroupValue& value) const {
+struct VarTypeHash {
+    size_t operator()(const VarType& value) const {
         return std::visit([](const auto& scalar) {
             using Value = std::decay_t<decltype(scalar)>;
             return std::hash<Value>()(scalar);
@@ -40,35 +30,35 @@ struct GroupValueHash {
     }
 };
 
-struct GroupKeyHash {
-    size_t operator()(const GroupKey& key) const {
+struct VarVectorHash {
+    size_t operator()(const VarVector& key) const {
         size_t result = 0;
-        GroupValueHash value_hash;
-        for (const GroupValue& value : key) {
+        VarTypeHash value_hash;
+        for (const VarType& value : key) {
             result = HashCombine(result, value_hash(value));
         }
         return result;
     }
 };
 
-GroupValue GetGroupValue(const ctp::Column& column, size_t row_idx) {
-    return std::visit([row_idx](const auto& values) -> GroupValue {
+VarType GetVarType(const ctp::Column& column, size_t row_idx) {
+    return std::visit([row_idx](const auto& values) -> VarType {
         return values[row_idx];
     }, column);
 }
 
-GroupKey MakeGroupKey(const ExecBatch& batch,
+VarVector MakeVarVector(const ExecBatch& batch,
                       const std::vector<size_t>& group_indices,
                       size_t row_idx) {
-    GroupKey key;
+    VarVector key;
     key.reserve(group_indices.size());
     for (size_t column_idx : group_indices) {
-        key.push_back(GetGroupValue(batch.columns[column_idx], row_idx));
+        key.push_back(GetVarType(batch.columns[column_idx], row_idx));
     }
     return key;
 }
 
-void AppendGroupValue(ctp::Column& column, const GroupValue& value) {
+void AppendVarType(ctp::Column& column, const VarType& value) {
     std::visit([&column](const auto& scalar) {
         using Value = std::decay_t<decltype(scalar)>;
         std::get<std::vector<Value>>(column).push_back(scalar);
@@ -125,14 +115,14 @@ std::optional<ExecBatch> GroupAgrOperator::Next() {
     std::shared_ptr<const Schema> output_schema = std::make_shared<Schema>(
         Schema::FromColumns(output_names, output_types));
 
-    std::unordered_map<GroupKey, std::vector<AggregateState>, GroupKeyHash>
+    std::unordered_map<VarVector, std::vector<AggregateState>, VarVectorHash>
         groups;
 
     while (optional_batch.has_value()) {
         ExecBatch& exec_batch = optional_batch.value();
 
         for (size_t row_idx = 0; row_idx < exec_batch.row_count; row_idx++) {
-            GroupKey key = MakeGroupKey(exec_batch, group_indices, row_idx);
+            VarVector key = MakeVarVector(exec_batch, group_indices, row_idx);
             auto [it, inserted] = groups.try_emplace(
                 std::move(key), initial_states);
 
@@ -154,7 +144,7 @@ std::optional<ExecBatch> GroupAgrOperator::Next() {
 
     for (auto& [key, aggregate_states] : groups) {
         for (size_t idx = 0; idx < key.size(); idx++) {
-            AppendGroupValue(output_columns[idx], key[idx]);
+            AppendVarType(output_columns[idx], key[idx]);
         }
 
         ctp::ColumnarBatch aggregate_results =

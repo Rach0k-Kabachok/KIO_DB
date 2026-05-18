@@ -46,6 +46,17 @@ struct SortKey {
     SortOrder order = SortOrder::ASC;
 };
 
+using VarType = std::variant<
+    size_t,
+    int64_t,
+    int32_t,
+    int16_t,
+    std::string,
+    char,
+    unsigned char>;
+
+using VarVector = std::vector<VarType>;
+
 using RowPredicate = std::function<bool(const ExecBatch& batch, size_t row_idx)>;
 
 
@@ -176,7 +187,31 @@ private:
 };
 
 
-class SortOperator: public IOperator {
+class SortOperatorBase {
+protected:
+    explicit SortOperatorBase(const std::vector<SortKey>& sort_keys);
+    virtual ~SortOperatorBase() = default;
+
+    struct SortColumn {
+        size_t column_idx = 0;
+        SortOrder order = SortOrder::ASC;
+    };
+
+    std::vector<SortColumn> MakeSortColumns(const Schema& schema) const;
+
+    static bool CompareRows(const VarVector& lhs, const VarVector& rhs,
+                            const std::vector<SortColumn>& sort_columns);
+    static VarVector MakeRow(const ExecBatch& batch, size_t row_idx);
+    static std::vector<VarVector> MakeRows(const ExecBatch& batch);
+    static ctp::ColumnarBatch MakeOutputColumns(
+        const std::vector<VarVector>& rows,
+        const std::shared_ptr<const Schema>& schema);
+
+    std::vector<SortKey> sort_keys_;
+};
+
+
+class SortOperator: public IOperator, protected SortOperatorBase {
 public:
     SortOperator(std::unique_ptr<IOperator> child_op,
                  const std::vector<SortKey>& sort_keys);
@@ -184,13 +219,20 @@ public:
     virtual std::optional<ExecBatch> Next() override;
     virtual ~SortOperator() = default;
 private:
+    std::vector<VarVector> MergeSortedBatchPair(
+        std::vector<VarVector>& lhs,
+        std::vector<VarVector>& rhs,
+        const std::vector<SortColumn>& sort_columns) const;
+    std::vector<VarVector> MergeSortedBatches(
+        std::vector<std::vector<VarVector>> sorted_batches,
+        const std::vector<SortColumn>& sort_columns) const;
+
     std::unique_ptr<IOperator> child_op_;
-    std::vector<SortKey> sort_keys_;
     bool done_ = false;
 };
 
 
-class TopKOperator: public IOperator {
+class TopKOperator: public IOperator, protected SortOperatorBase {
 public:
     TopKOperator(std::unique_ptr<IOperator> child_op,
                  const std::vector<SortKey>& sort_keys, size_t limit);
@@ -199,8 +241,8 @@ public:
     virtual ~TopKOperator() = default;
 private:
     std::unique_ptr<IOperator> child_op_;
-    std::vector<SortKey> sort_keys_;
     size_t limit_;
+
     bool done_ = false;
 };
 

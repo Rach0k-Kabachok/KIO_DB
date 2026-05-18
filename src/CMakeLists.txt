@@ -21,11 +21,15 @@ add_library(kio_core STATIC
         execution/aggregate_operator_base.cpp
         execution/global_agr_op.cpp
         execution/group_agr_op.cpp
+        execution/sort_operator_base.cpp
+        execution/sort_op.cpp
+        execution/top_k_op.cpp
 
 )
 
 target_include_directories(kio_core PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/global
 )
 
 add_executable(kio_db main.cpp)
