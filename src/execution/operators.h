@@ -25,6 +25,7 @@ using VarType = std::variant<
     int64_t,
     int32_t,
     int16_t,
+    double,
     std::string,
     char,
     unsigned char>;
@@ -38,11 +39,24 @@ public:
     virtual ~IOperator() = default;
 };
 
+struct MinMaxConstraint {
+    std::string column_name;
+    Schema::Types type = Schema::BIGINT;
+    std::optional<VarType> lower;
+    std::optional<VarType> upper;
+    bool lower_inclusive = true;
+    bool upper_inclusive = true;
+    bool not_equal = false;
+    VarType not_equal_value = int64_t{0};
+};
 
 class TableScanOperator: public IOperator {
 public:
     TableScanOperator(const std::string& db_filename,
                       const std::vector<std::string>& column_names);
+    TableScanOperator(const std::string& db_filename,
+                      const std::vector<std::string>& column_names,
+                      std::shared_ptr<std::vector<MinMaxConstraint>> constraints);
 
     virtual std::optional<ExecBatch> Next() override;
     virtual ~TableScanOperator() = default;
@@ -50,6 +64,29 @@ private:
     std::shared_ptr<const Schema> output_schema_;
     KioDbReader reader_;
     std::vector<size_t> column_indices_;
+    std::shared_ptr<std::vector<MinMaxConstraint>> constraints_;
+};
+
+class ComputeOperator: public IOperator {
+public:
+    using RowComputer = std::function<VarType(const ExecBatch& batch,
+                                              size_t row_idx)>;
+
+    struct ComputedColumnSpec {
+        std::string name;
+        Schema::Types type = Schema::BIGINT;
+        RowComputer compute;
+    };
+
+    ComputeOperator(std::unique_ptr<IOperator> child_op,
+                    std::vector<ComputedColumnSpec> computed_columns);
+
+    virtual std::optional<ExecBatch> Next() override;
+    virtual ~ComputeOperator() = default;
+private:
+    std::unique_ptr<IOperator> child_op_;
+    std::vector<ComputedColumnSpec> computed_columns_;
+    std::shared_ptr<const Schema> output_schema_;
 };
 
 
@@ -89,6 +126,7 @@ public:
         std::unordered_set<int64_t>,
         std::unordered_set<int32_t>,
         std::unordered_set<int16_t>,
+        std::unordered_set<double>,
         std::unordered_set<std::string>,
         std::unordered_set<char>,
         std::unordered_set<unsigned char>>;
@@ -115,6 +153,7 @@ public:
         Schema::Types result_type = Schema::BIGINT;
         ctp::Column result;
         int64_t avg_count = 0;
+        double avg_sum = 0.0;
         DistinctSet distinct_values;
     };
 protected:
@@ -147,6 +186,9 @@ protected:
     std::vector<AggregateSpec> aggregates_;
 };
 
+using AggregateKind = AggregateOperatorBase::AggregateKind;
+using AggregateSpec = AggregateOperatorBase::AggregateSpec;
+
 class GlobalAgrOperator: public IOperator, protected AggregateOperatorBase {
 public:
     GlobalAgrOperator(std::unique_ptr<IOperator> child_op,
@@ -158,7 +200,6 @@ private:
     std::unique_ptr<IOperator> child_op_;
     bool done_ = false;
 };
-
 
 class GroupAgrOperator: public IOperator, protected AggregateOperatorBase {
 public:
@@ -208,6 +249,9 @@ protected:
 
     std::vector<SortKey> sort_keys_;
 };
+
+using SortOrder = SortOperatorBase::SortOrder;
+using SortKey = SortOperatorBase::SortKey;
 
 class SortOperator: public IOperator, protected SortOperatorBase {
 public:

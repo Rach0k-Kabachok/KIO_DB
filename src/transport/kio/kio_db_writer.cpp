@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <iomanip>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -21,8 +23,7 @@ constexpr std::streamoff kFooterOffsetPosition =
     sizeof(kio::kMagic);
 
 struct SerializedColumnChunk {
-    uint64_t local_offset = 0;
-    kio::ColumnChunkInfo info{};
+    kio::ColumnChunkInfo info;
     std::vector<char> payload;
 };
 
@@ -33,7 +34,18 @@ void WriteString(std::ostream& output, const std::string& value) {
 }
 
 template <typename T>
-kio::ColumnChunkInfo MakeStatsForValues(const std::vector<T>& values) {
+std::string FormatStatsValue(T value) {
+    if constexpr (std::is_floating_point_v<T>) {
+        std::ostringstream out;
+        out << std::setprecision(17) << value;
+        return out.str();
+    } else {
+        return std::to_string(value);
+    }
+}
+
+template <typename T>
+kio::ColumnChunkInfo FindMinMax(const std::vector<T>& values) {
     kio::ColumnChunkInfo info;
     if (values.empty()) {
         return info;
@@ -49,8 +61,8 @@ kio::ColumnChunkInfo MakeStatsForValues(const std::vector<T>& values) {
         info.min_value = std::string(1, *min_it);
         info.max_value = std::string(1, *max_it);
     } else {
-        info.min_value = std::to_string(*min_it);
-        info.max_value = std::to_string(*max_it);
+        info.min_value = FormatStatsValue(*min_it);
+        info.max_value = FormatStatsValue(*max_it);
     }
 
     return info;
@@ -60,7 +72,7 @@ kio::ColumnChunkInfo MakeColumnInfo(const ctp::Column& column,
                                     uint64_t local_offset,
                                     uint64_t payload_size) {
     kio::ColumnChunkInfo info = std::visit(
-        [](const auto& values) { return MakeStatsForValues(values); }, column);
+        [](const auto& values) { return FindMinMax(values); }, column);
 
     info.local_offset = local_offset;
     info.size = payload_size;
@@ -97,17 +109,16 @@ void KioDbWriter::WriteHeader() {
 }
 
 kio::BatchMeta KioDbWriter::MakeBatchMeta(const ctp::ColumnarBatch& batch) {
-    std::streampos batch_meta_pos = kio_file_.tellp();
-    if (batch_meta_pos == std::streampos(-1)) {
-        throw std::runtime_error("Failed to get batch metadata position");
+    std::streampos batch_start_pos = kio_file_.tellp();
+    if (batch_start_pos == std::streampos(-1)) {
+        throw std::runtime_error("Failed to get batch start position");
     }
 
     kio::BatchMeta batch_meta{};
     batch_meta.batch_id = cur_batch_++;
     batch_meta.row_num = ctp::GetColumnRowCount(batch[0]);
     batch_meta.col_num = batch.size();
-    batch_meta.batch_start_offset =
-        static_cast<uint64_t>(batch_meta_pos) + sizeof(kio::BatchMeta);
+    batch_meta.batch_start_offset = static_cast<uint64_t>(batch_start_pos);
     batch_meta.batch_size = kio::GetBatchPayloadSize(batch);
 
     return batch_meta;
@@ -120,8 +131,7 @@ std::vector<kio::ColumnChunkInfo> KioDbWriter::WriteColumns(
     chunks.reserve(batch.size());
     column_infos.reserve(batch.size());
 
-    uint64_t column_offset =
-        sizeof(uint64_t) * batch.size();
+    uint64_t column_offset = 0;
 
     for (size_t col_idx = 0; col_idx < batch.size(); ++col_idx) {
         const auto& column = batch[col_idx];
@@ -129,16 +139,11 @@ std::vector<kio::ColumnChunkInfo> KioDbWriter::WriteColumns(
 
         std::vector<char> payload = kio::SerializeColumn(column, col_type);
         SerializedColumnChunk chunk;
-        chunk.local_offset = column_offset;
         chunk.info = MakeColumnInfo(column, column_offset, payload.size());
         chunk.payload = std::move(payload);
         column_offset += chunk.info.size;
         column_infos.push_back(std::move(chunk.info));
         chunks.push_back(std::move(chunk));
-    }
-
-    for (const auto& chunk : chunks) {
-        bio::WritePod(kio_file_, chunk.local_offset);
     }
 
     for (const auto& chunk : chunks) {
@@ -159,7 +164,6 @@ void KioDbWriter::WriteBatchToFile(const ctp::ColumnarBatch& batch) {
 
     kio::RowGroupMeta row_group;
     row_group.batch = MakeBatchMeta(batch);
-    bio::WritePod(kio_file_, row_group.batch);
     row_group.columns = WriteColumns(batch);
 
     metadata_.row_count += row_group.batch.row_num;

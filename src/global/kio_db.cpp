@@ -20,6 +20,6 @@ void KioDb::ImportCsvToKio() {
 
 void KioDb::ExportKioToCsv(const std::string& csv_out_file) {
     KioDbReader reader(kio_db_file_);
-    CsvExporter exporter(reader, csv_out_file);
-    exporter.Export();
+    CsvExporter exporter(csv_out_file);
+    exporter.ExportFile(reader);
 }

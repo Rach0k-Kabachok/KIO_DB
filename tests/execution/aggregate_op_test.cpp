@@ -84,11 +84,12 @@ TEST(GlobalAgrOperatorTest, AggregatesAcrossBatches) {
     EXPECT_EQ(batch->row_count, 1u);
     EXPECT_EQ(batch->schema->ColumnName(0), "cnt");
     EXPECT_EQ(batch->schema->ColumnName(3), "min_name");
+    EXPECT_EQ(batch->schema->ColumnType(2), Schema::DOUBLE);
     EXPECT_EQ(batch->schema->ColumnType(3), Schema::TEXT);
 
     EXPECT_EQ(std::get<std::vector<int64_t>>(batch->columns[0])[0], 5);
     EXPECT_EQ(std::get<std::vector<int64_t>>(batch->columns[1])[0], 13);
-    EXPECT_EQ(std::get<std::vector<int64_t>>(batch->columns[2])[0], 2);
+    EXPECT_DOUBLE_EQ(std::get<std::vector<double>>(batch->columns[2])[0], 2.6);
     EXPECT_EQ(std::get<std::vector<std::string>>(batch->columns[3])[0], "a");
     EXPECT_EQ(std::get<std::vector<int64_t>>(batch->columns[4])[0], 5);
     EXPECT_EQ(std::get<std::vector<int64_t>>(batch->columns[5])[0], 3);
