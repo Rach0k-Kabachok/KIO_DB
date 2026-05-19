@@ -6,6 +6,8 @@
 #include <type_traits>
 #include <vector>
 
+namespace bcodec {
+
 template <typename T>
 void AppendPod(std::vector<char>& output, const T& value) {
     static_assert(std::is_trivially_copyable_v<T>);
@@ -48,3 +50,5 @@ inline std::string ReadString(const std::vector<char>& input, size_t& offset) {
     offset += size;
     return result;
 }
+
+}  // namespace bcodec
