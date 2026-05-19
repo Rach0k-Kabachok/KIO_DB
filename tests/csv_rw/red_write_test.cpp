@@ -107,10 +107,10 @@ TEST(ReadWrite, RoundTripBatchAndEOF) {
     }
 
     KioDbReader reader(path_db);
-    std::optional<KioReadBatch> actual = reader.ReadNextBatch();
+    std::optional<ctp::ColumnarBatch> actual = reader.ReadNextBatch();
     ASSERT_TRUE(actual.has_value());
-    EXPECT_EQ(actual->columns, expected);
-    EXPECT_EQ(actual->row_count, 3u);
+    EXPECT_EQ(*actual, expected);
+    EXPECT_EQ(reader.GetMetadata().row_groups[0].batch.row_num, 3u);
     EXPECT_FALSE(reader.ReadNextBatch().has_value());
 
     std::filesystem::remove(path_db, ec);
@@ -134,10 +134,10 @@ TEST(ReadWrite, RoundTripsDoubleColumns) {
     }
 
     KioDbReader reader(path_db);
-    std::optional<KioReadBatch> actual = reader.ReadNextBatch();
+    std::optional<ctp::ColumnarBatch> actual = reader.ReadNextBatch();
     ASSERT_TRUE(actual.has_value());
-    EXPECT_EQ(actual->columns, expected);
-    EXPECT_EQ(actual->row_count, 3u);
+    EXPECT_EQ(*actual, expected);
+    EXPECT_EQ(reader.GetMetadata().row_groups[0].batch.row_num, 3u);
 
     std::filesystem::remove(path_db, ec);
 }
@@ -169,17 +169,19 @@ TEST(ReadWrite, ReadsProjectedColumns) {
     ctp::ColumnarBatch expected_first = {
         ctp::Column{std::vector<int16_t>{1, 2}},
         ctp::Column{std::vector<std::string>{"alpha", "beta"}}};
-    std::optional<KioReadBatch> actual_first = reader.ReadNextBatch({2, 0});
+    std::optional<ctp::ColumnarBatch> actual_first =
+        reader.ReadNextBatch({2, 0});
     ASSERT_TRUE(actual_first.has_value());
-    EXPECT_EQ(actual_first->columns, expected_first);
-    EXPECT_EQ(actual_first->row_count, 2u);
+    EXPECT_EQ(*actual_first, expected_first);
+    EXPECT_EQ(reader.GetMetadata().row_groups[0].batch.row_num, 2u);
 
     ctp::ColumnarBatch expected_second = {
         ctp::Column{std::vector<int64_t>{30, 40}}};
-    std::optional<KioReadBatch> actual_second = reader.ReadNextBatch({1});
+    std::optional<ctp::ColumnarBatch> actual_second =
+        reader.ReadNextBatch({1});
     ASSERT_TRUE(actual_second.has_value());
-    EXPECT_EQ(actual_second->columns, expected_second);
-    EXPECT_EQ(actual_second->row_count, 2u);
+    EXPECT_EQ(*actual_second, expected_second);
+    EXPECT_EQ(reader.GetMetadata().row_groups[1].batch.row_num, 2u);
     EXPECT_FALSE(reader.ReadNextBatch({1}).has_value());
 
     std::filesystem::remove(path_db, ec);

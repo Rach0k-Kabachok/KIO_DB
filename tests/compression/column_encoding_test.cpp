@@ -156,10 +156,10 @@ TEST(ColumnEncodingTest, KioRoundTripsEncodedColumnsAndMetadata) {
     }
     EXPECT_EQ(metadata.row_groups[0].batch.batch_size, expected_batch_size);
 
-    std::optional<KioReadBatch> actual = reader.ReadNextBatch();
+    std::optional<ctp::ColumnarBatch> actual = reader.ReadNextBatch();
     ASSERT_TRUE(actual.has_value());
-    EXPECT_EQ(actual->columns, expected);
-    EXPECT_EQ(actual->row_count, 3u);
+    EXPECT_EQ(*actual, expected);
+    EXPECT_EQ(metadata.row_groups[0].batch.row_num, 3u);
     EXPECT_FALSE(reader.ReadNextBatch().has_value());
 
     std::filesystem::remove(path_db, ec);
