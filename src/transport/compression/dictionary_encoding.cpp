@@ -107,6 +107,7 @@ std::vector<char> DictionaryEncoding::Encode(
     case Schema::CHAR:
     case Schema::TIMESTAMP:
     case Schema::DATE:
+    case Schema::DOUBLE:
         break;
     }
 
@@ -127,6 +128,7 @@ ctp::Column DictionaryEncoding::Decode(
     case Schema::CHAR:
     case Schema::TIMESTAMP:
     case Schema::DATE:
+    case Schema::DOUBLE:
         break;
     }
 

@@ -77,6 +77,8 @@ ctp::Column PlainEncoding::Decode(
     case Schema::TEXT:
     case Schema::VARCHAR:
         return DecodeStringColumn(payload, row_count);
+    case Schema::DOUBLE:
+        return DecodeFixedColumn<double>(payload, row_count);
     }
 
     throw std::invalid_argument("Unsupported schema type");

@@ -134,7 +134,8 @@ std::vector<char> BitPackingEncoding::Encode(
         return EncodeTypedColumn(std::get<std::vector<char>>(column));
     case Schema::TEXT:
     case Schema::VARCHAR:
-        break;
+    case Schema::DOUBLE:
+        return EncodeTypedColumn(std::get<std::vector<double>>(column));
     }
 
     throw std::invalid_argument("Bit packing supports only fixed-width types");
@@ -157,6 +158,7 @@ ctp::Column BitPackingEncoding::Decode(
         return DecodeTypedColumn<char>(payload, row_count);
     case Schema::TEXT:
     case Schema::VARCHAR:
+    case Schema::DOUBLE:
         break;
     }
 

@@ -93,6 +93,10 @@ ctp::Column ReadColumnByType(std::istream& input, uint64_t row_num,
 ctp::Column ReadColumnFromFile(std::ifstream& file, uint64_t row_num,
                                Schema::Types type,
                                const kio::ColumnChunkInfo& chunk) {
+    if (chunk.size != chunk.compressed_size) {
+        throw std::runtime_error("Corrupted KIO footer: chunk size mismatch");
+    }
+
     std::vector<char> payload(chunk.size);
     bio::ReadBytes(file, payload.data(), chunk.size);
     return DecodeColumnForRead(
@@ -194,8 +198,10 @@ void KioDbReader::ReadFooter(uint64_t footer_offset) {
             chunk.size = bio::ReadPod<uint64_t>(kio_file_);
             chunk.compressed_size = bio::ReadPod<uint64_t>(kio_file_);
             chunk.uncompressed_size = bio::ReadPod<uint64_t>(kio_file_);
-            chunk.encoding = bio::ReadPod<kio::Encoding>(kio_file_);
-            chunk.compression = bio::ReadPod<kio::Compression>(kio_file_);
+            chunk.encoding = static_cast<kio::Encoding>
+                             (bio::ReadPod<uint8_t>(kio_file_));
+            chunk.compression = static_cast<kio::Compression>
+                             (bio::ReadPod<uint8_t>(kio_file_));
             chunk.has_min_max = bio::ReadPod<uint8_t>(kio_file_) != 0;
             chunk.min_value = ReadString(kio_file_);
             chunk.max_value = ReadString(kio_file_);

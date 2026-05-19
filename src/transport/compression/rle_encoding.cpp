@@ -4,8 +4,10 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
+#include "schema.h"
 #include "transport/compression/binary_codec.h"
 
 namespace {
@@ -122,23 +124,16 @@ kio::Encoding RleEncoding::Kind() const {
 std::vector<char> RleEncoding::Encode(
     const ctp::Column& column,
     Schema::Types type) const {
-    switch (type) {
-    case Schema::BIGINT:
-    case Schema::TIMESTAMP:
-        return EncodeTypedColumn(std::get<std::vector<int64_t>>(column));
-    case Schema::INTEGER:
-    case Schema::DATE:
-        return EncodeTypedColumn(std::get<std::vector<int32_t>>(column));
-    case Schema::SMALLINT:
-        return EncodeTypedColumn(std::get<std::vector<int16_t>>(column));
-    case Schema::CHAR:
-        return EncodeTypedColumn(std::get<std::vector<char>>(column));
-    case Schema::TEXT:
-    case Schema::VARCHAR:
-        return EncodeStringColumn(std::get<std::vector<std::string>>(column));
-    }
+    return std::visit([](const auto& values) -> std::vector<char> {
+        using Values = std::decay_t<decltype(values)>;
+        using Value = typename Values::value_type;
 
-    throw std::invalid_argument("Unsupported schema type");
+        if constexpr (std::is_same_v<Value, std::string>) {
+            return EncodeStringColumn(values);
+        } else {
+            return EncodeTypedColumn(values);
+        }
+    }, column);
 }
 
 ctp::Column RleEncoding::Decode(
@@ -159,6 +154,8 @@ ctp::Column RleEncoding::Decode(
     case Schema::TEXT:
     case Schema::VARCHAR:
         return DecodeStringColumn(payload, row_count);
+    case Schema::DOUBLE:
+        return DecodeTypedColumn<double>(payload, row_count);
     }
 
     throw std::invalid_argument("Unsupported schema type");

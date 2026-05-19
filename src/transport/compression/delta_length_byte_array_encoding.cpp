@@ -76,6 +76,7 @@ std::vector<char> DeltaLengthByteArrayEncoding::Encode(
     case Schema::CHAR:
     case Schema::TIMESTAMP:
     case Schema::DATE:
+    case Schema::DOUBLE:
         break;
     }
 
@@ -97,6 +98,7 @@ ctp::Column DeltaLengthByteArrayEncoding::Decode(
     case Schema::CHAR:
     case Schema::TIMESTAMP:
     case Schema::DATE:
+    case Schema::DOUBLE:
         break;
     }
 

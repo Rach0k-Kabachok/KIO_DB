@@ -69,14 +69,6 @@ ExecBatch Collect(OperatorPtr op) {
     return result;
 }
 
-ExecBatch SingleInt64(const std::string& name, int64_t value) {
-    return ExecBatch{
-        ctp::ColumnarBatch{ctp::Column{std::vector<int64_t>{value}}},
-        std::make_shared<Schema>(
-            Schema::FromColumns({name}, {Schema::BIGINT})),
-        1};
-}
-
 template <typename T>
 const std::vector<T>& Values(const ExecBatch& batch, size_t column_idx) {
     return ctp::GetColumnData<T>(batch.columns[column_idx]);
@@ -466,54 +458,53 @@ OperatorPtr QueryWithSearchPhrase(std::string db_filename,
 
 }  // namespace
 
-ExecBatch ExecuteClickBenchQuery(const std::string& db_filename, int query_id) {
+std::unique_ptr<IOperator> MakeClickBenchQuery(const std::string& db_filename,
+                                               int query_id) {
     switch (query_id) {
-    case 1: {
-        KioDbReader reader(db_filename);
-        return SingleInt64("count", reader.GetMetadata().row_count);
-    }
+    case 1:
+        return Global(Scan(db_filename, {}), {Count()});
     case 2:
-        return Collect(Global(
+        return Global(
             Filter(Scan(db_filename, {"AdvEngineID"},
                         Constraints({NotEqConstraint(
                             "AdvEngineID", Schema::SMALLINT, int16_t{0})})),
                    NotEqualTo<int16_t>("AdvEngineID", 0)),
-            {Count()}));
+            {Count()});
     case 3:
-        return Collect(Global(
+        return Global(
             Scan(db_filename, {"AdvEngineID", "ResolutionWidth"}),
             {Sum("AdvEngineID", "sum"),
              Count(),
-             Avg("ResolutionWidth", "avg")}));
+             Avg("ResolutionWidth", "avg")});
     case 4:
-        return Collect(Global(Scan(db_filename, {"UserID"}),
-                              {Avg("UserID", "avg")}));
+        return Global(Scan(db_filename, {"UserID"}),
+                              {Avg("UserID", "avg")});
     case 5:
-        return Collect(Global(Scan(db_filename, {"UserID"}),
-                              {CountDistinct("UserID", "uniq")}));
+        return Global(Scan(db_filename, {"UserID"}),
+                              {CountDistinct("UserID", "uniq")});
     case 6:
-        return Collect(Global(Scan(db_filename, {"SearchPhrase"}),
-                              {CountDistinct("SearchPhrase", "uniq")}));
+        return Global(Scan(db_filename, {"SearchPhrase"}),
+                              {CountDistinct("SearchPhrase", "uniq")});
     case 7:
-        return Collect(Global(Scan(db_filename, {"EventDate"}),
+        return Global(Scan(db_filename, {"EventDate"}),
                               {Min("EventDate", "min"),
-                               Max("EventDate", "max")}));
+                               Max("EventDate", "max")});
     case 8:
-        return Collect(Sort(
+        return Sort(
             Group(Filter(Scan(db_filename, {"AdvEngineID"},
                               Constraints({NotEqConstraint(
                                   "AdvEngineID", Schema::SMALLINT,
                                   int16_t{0})})),
                          NotEqualTo<int16_t>("AdvEngineID", 0)),
                   {"AdvEngineID"}, {Count("c")}),
-            {SortKey{"c", SortOrder::DESC}}));
+            {SortKey{"c", SortOrder::DESC}});
     case 9:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Scan(db_filename, {"RegionID", "UserID"}),
                   {"RegionID"}, {CountDistinct("UserID", "u")}),
-            {SortKey{"u", SortOrder::DESC}}, 10));
+            {SortKey{"u", SortOrder::DESC}}, 10);
     case 10:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Scan(db_filename,
                        {"RegionID", "AdvEngineID", "ResolutionWidth", "UserID"}),
                   {"RegionID"},
@@ -521,83 +512,83 @@ ExecBatch ExecuteClickBenchQuery(const std::string& db_filename, int query_id) {
                    Count("c"),
                    Avg("ResolutionWidth", "avg"),
                    CountDistinct("UserID", "uniq")}),
-            {SortKey{"c", SortOrder::DESC}}, 10));
+            {SortKey{"c", SortOrder::DESC}}, 10);
     case 11:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Filter(Scan(db_filename, {"MobilePhoneModel", "UserID"}),
                          StringNotEmpty("MobilePhoneModel")),
                   {"MobilePhoneModel"},
                   {CountDistinct("UserID", "u")}),
-            {SortKey{"u", SortOrder::DESC}}, 10));
+            {SortKey{"u", SortOrder::DESC}}, 10);
     case 12:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Filter(Scan(db_filename,
                               {"MobilePhone", "MobilePhoneModel", "UserID"}),
                          StringNotEmpty("MobilePhoneModel")),
                   {"MobilePhone", "MobilePhoneModel"},
                   {CountDistinct("UserID", "u")}),
-            {SortKey{"u", SortOrder::DESC}}, 10));
+            {SortKey{"u", SortOrder::DESC}}, 10);
     case 13:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Filter(Scan(db_filename, {"SearchPhrase"}),
                          StringNotEmpty("SearchPhrase")),
                   {"SearchPhrase"}, {Count("c")}),
-            {SortKey{"c", SortOrder::DESC}}, 10));
+            {SortKey{"c", SortOrder::DESC}}, 10);
     case 14:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Filter(Scan(db_filename, {"SearchPhrase", "UserID"}),
                          StringNotEmpty("SearchPhrase")),
                   {"SearchPhrase"}, {CountDistinct("UserID", "u")}),
-            {SortKey{"u", SortOrder::DESC}}, 10));
+            {SortKey{"u", SortOrder::DESC}}, 10);
     case 15:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Filter(Scan(db_filename,
                               {"SearchEngineID", "SearchPhrase"}),
                          StringNotEmpty("SearchPhrase")),
                   {"SearchEngineID", "SearchPhrase"}, {Count("c")}),
-            {SortKey{"c", SortOrder::DESC}}, 10));
+            {SortKey{"c", SortOrder::DESC}}, 10);
     case 16:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Scan(db_filename, {"UserID"}), {"UserID"}, {Count("c")}),
-            {SortKey{"c", SortOrder::DESC}}, 10));
+            {SortKey{"c", SortOrder::DESC}}, 10);
     case 17:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Scan(db_filename, {"UserID", "SearchPhrase"}),
                   {"UserID", "SearchPhrase"}, {Count("c")}),
-            {SortKey{"c", SortOrder::DESC}}, 10));
+            {SortKey{"c", SortOrder::DESC}}, 10);
     case 18:
-        return Collect(Limit(
+        return Limit(
             Group(Scan(db_filename, {"UserID", "SearchPhrase"}),
                   {"UserID", "SearchPhrase"}, {Count("c")}),
-            10));
+            10);
     case 19:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Compute(Scan(db_filename,
                                {"UserID", "EventTime", "SearchPhrase"}),
                           {MinuteColumn("EventTime", "m")}),
                   {"UserID", "m", "SearchPhrase"}, {Count("c")}),
-            {SortKey{"c", SortOrder::DESC}}, 10));
+            {SortKey{"c", SortOrder::DESC}}, 10);
     case 20:
-        return Collect(Project(
+        return Project(
             Filter(Scan(db_filename, {"UserID"},
                         Constraints({EqConstraint(
                             "UserID", Schema::BIGINT,
                             int64_t{435090932899640449})})),
                    EqualTo<int64_t>("UserID", 435090932899640449)),
-            {"UserID"}));
+            {"UserID"});
     case 21:
-        return Collect(Global(
+        return Global(
             Filter(Scan(db_filename, {"URL"}), Contains("URL", "google")),
-            {Count()}));
+            {Count()});
     case 22:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Filter(Scan(db_filename, {"SearchPhrase", "URL"}),
                          And({Contains("URL", "google"),
                               StringNotEmpty("SearchPhrase")})),
                   {"SearchPhrase"}, {Min("URL", "min_url"), Count("c")}),
-            {SortKey{"c", SortOrder::DESC}}, 10));
+            {SortKey{"c", SortOrder::DESC}}, 10);
     case 23:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Filter(Scan(db_filename,
                               {"SearchPhrase", "URL", "Title", "UserID"}),
                          And({Contains("Title", "Google"),
@@ -608,36 +599,36 @@ ExecBatch ExecuteClickBenchQuery(const std::string& db_filename, int query_id) {
                    Min("Title", "min_title"),
                    Count("c"),
                    CountDistinct("UserID", "uniq")}),
-            {SortKey{"c", SortOrder::DESC}}, 10));
+            {SortKey{"c", SortOrder::DESC}}, 10);
     case 24:
-        return Collect(Limit(
+        return Limit(
             Sort(Filter(Scan(db_filename, AllColumns(db_filename)),
                         Contains("URL", "google")),
                  {SortKey{"EventTime", SortOrder::ASC}}),
-            10));
+            10);
     case 25:
-        return Collect(Project(
+        return Project(
             Limit(Sort(Filter(Scan(db_filename, {"SearchPhrase", "EventTime"}),
                               StringNotEmpty("SearchPhrase")),
                        {SortKey{"EventTime", SortOrder::ASC}}),
                   10),
-            {"SearchPhrase"}));
+            {"SearchPhrase"});
     case 26:
-        return Collect(Limit(
+        return Limit(
             Sort(Filter(Scan(db_filename, {"SearchPhrase"}),
                         StringNotEmpty("SearchPhrase")),
                  {SortKey{"SearchPhrase", SortOrder::ASC}}),
-            10));
+            10);
     case 27:
-        return Collect(Project(
+        return Project(
             Limit(Sort(Filter(Scan(db_filename, {"SearchPhrase", "EventTime"}),
                               StringNotEmpty("SearchPhrase")),
                        {SortKey{"EventTime", SortOrder::ASC},
                         SortKey{"SearchPhrase", SortOrder::ASC}}),
                   10),
-            {"SearchPhrase"}));
+            {"SearchPhrase"});
     case 28:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Filter(Group(Compute(
                              Filter(Scan(db_filename, {"CounterID", "URL"}),
                                     StringNotEmpty("URL")),
@@ -645,9 +636,9 @@ ExecBatch ExecuteClickBenchQuery(const std::string& db_filename, int query_id) {
                          {"CounterID"},
                          {Avg("url_length", "l"), Count("c")}),
                    GreaterEqual<int64_t>("c", 100001)),
-            {SortKey{"l", SortOrder::DESC}}, 25));
+            {SortKey{"l", SortOrder::DESC}}, 25);
     case 29:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Filter(Group(Compute(
                              Filter(Scan(db_filename, {"Referer"}),
                                     StringNotEmpty("Referer")),
@@ -658,7 +649,7 @@ ExecBatch ExecuteClickBenchQuery(const std::string& db_filename, int query_id) {
                           Count("c"),
                           Min("Referer", "min_referer")}),
                    GreaterEqual<int64_t>("c", 100001)),
-            {SortKey{"l", SortOrder::DESC}}, 25));
+            {SortKey{"l", SortOrder::DESC}}, 25);
     case 30: {
         std::vector<ComputeOperator::ComputedColumnSpec> computed;
         std::vector<AggregateSpec> aggregates{Sum("ResolutionWidth", "s0")};
@@ -669,12 +660,12 @@ ExecBatch ExecuteClickBenchQuery(const std::string& db_filename, int query_id) {
             computed.push_back(SmallIntPlus("ResolutionWidth", idx, name));
             aggregates.push_back(Sum(name, "s" + std::to_string(idx)));
         }
-        return Collect(Global(
+        return Global(
             Compute(Scan(db_filename, {"ResolutionWidth"}), std::move(computed)),
-            std::move(aggregates)));
+            std::move(aggregates));
     }
     case 31:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(QueryWithSearchPhrase(
                       db_filename,
                       {"SearchEngineID", "ClientIP", "IsRefresh",
@@ -682,9 +673,9 @@ ExecBatch ExecuteClickBenchQuery(const std::string& db_filename, int query_id) {
                   {"SearchEngineID", "ClientIP"},
                   {Count("c"), Sum("IsRefresh", "sum"),
                    Avg("ResolutionWidth", "avg")}),
-            {SortKey{"c", SortOrder::DESC}}, 10));
+            {SortKey{"c", SortOrder::DESC}}, 10);
     case 32:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(QueryWithSearchPhrase(
                       db_filename,
                       {"WatchID", "ClientIP", "IsRefresh",
@@ -692,27 +683,27 @@ ExecBatch ExecuteClickBenchQuery(const std::string& db_filename, int query_id) {
                   {"WatchID", "ClientIP"},
                   {Count("c"), Sum("IsRefresh", "sum"),
                    Avg("ResolutionWidth", "avg")}),
-            {SortKey{"c", SortOrder::DESC}}, 10));
+            {SortKey{"c", SortOrder::DESC}}, 10);
     case 33:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Scan(db_filename,
                        {"WatchID", "ClientIP", "IsRefresh",
                         "ResolutionWidth"}),
                   {"WatchID", "ClientIP"},
                   {Count("c"), Sum("IsRefresh", "sum"),
                    Avg("ResolutionWidth", "avg")}),
-            {SortKey{"c", SortOrder::DESC}}, 10));
+            {SortKey{"c", SortOrder::DESC}}, 10);
     case 34:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Scan(db_filename, {"URL"}), {"URL"}, {Count("c")}),
-            {SortKey{"c", SortOrder::DESC}}, 10));
+            {SortKey{"c", SortOrder::DESC}}, 10);
     case 35:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Compute(Scan(db_filename, {"URL"}), {ConstantOne()}),
                   {"one", "URL"}, {Count("c")}),
-            {SortKey{"c", SortOrder::DESC}}, 10));
+            {SortKey{"c", SortOrder::DESC}}, 10);
     case 36:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Compute(Scan(db_filename, {"ClientIP"}),
                           {Int32Minus("ClientIP", 1, "ClientIPMinus1"),
                            Int32Minus("ClientIP", 2, "ClientIPMinus2"),
@@ -720,9 +711,9 @@ ExecBatch ExecuteClickBenchQuery(const std::string& db_filename, int query_id) {
                   {"ClientIP", "ClientIPMinus1",
                    "ClientIPMinus2", "ClientIPMinus3"},
                   {Count("c")}),
-            {SortKey{"c", SortOrder::DESC}}, 10));
+            {SortKey{"c", SortOrder::DESC}}, 10);
     case 37:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Filter(Scan(db_filename,
                               {"URL", "CounterID", "EventDate",
                                "DontCountHits", "IsRefresh"},
@@ -732,9 +723,9 @@ ExecBatch ExecuteClickBenchQuery(const std::string& db_filename, int query_id) {
                          JulyFilters({EqualTo<int16_t>("DontCountHits", 0),
                                       StringNotEmpty("URL")})),
                   {"URL"}, {Count("PageViews")}),
-            {SortKey{"PageViews", SortOrder::DESC}}, 10));
+            {SortKey{"PageViews", SortOrder::DESC}}, 10);
     case 38:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Filter(Scan(db_filename,
                               {"Title", "CounterID", "EventDate",
                                "DontCountHits", "IsRefresh"},
@@ -744,9 +735,9 @@ ExecBatch ExecuteClickBenchQuery(const std::string& db_filename, int query_id) {
                          JulyFilters({EqualTo<int16_t>("DontCountHits", 0),
                                       StringNotEmpty("Title")})),
                   {"Title"}, {Count("PageViews")}),
-            {SortKey{"PageViews", SortOrder::DESC}}, 10));
+            {SortKey{"PageViews", SortOrder::DESC}}, 10);
     case 39:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Filter(Scan(db_filename,
                               {"URL", "CounterID", "EventDate",
                                "IsRefresh", "IsLink", "IsDownload"},
@@ -758,9 +749,9 @@ ExecBatch ExecuteClickBenchQuery(const std::string& db_filename, int query_id) {
                          JulyFilters({NotEqualTo<int16_t>("IsLink", 0),
                                       EqualTo<int16_t>("IsDownload", 0)})),
                   {"URL"}, {Count("PageViews")}),
-            {SortKey{"PageViews", SortOrder::DESC}}, 10, 1000));
+            {SortKey{"PageViews", SortOrder::DESC}}, 10, 1000);
     case 40:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Compute(Filter(
                               Scan(db_filename,
                                    {"TraficSourceID", "SearchEngineID",
@@ -772,9 +763,9 @@ ExecBatch ExecuteClickBenchQuery(const std::string& db_filename, int query_id) {
                   {"TraficSourceID", "SearchEngineID", "AdvEngineID",
                    "Src", "Dst"},
                   {Count("PageViews")}),
-            {SortKey{"PageViews", SortOrder::DESC}}, 10, 1000));
+            {SortKey{"PageViews", SortOrder::DESC}}, 10, 1000);
     case 41:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Filter(Scan(db_filename,
                               {"URLHash", "EventDate", "CounterID",
                                "IsRefresh", "TraficSourceID", "RefererHash"},
@@ -788,9 +779,9 @@ ExecBatch ExecuteClickBenchQuery(const std::string& db_filename, int query_id) {
                                           "RefererHash",
                                           3594120000172545465)})),
                   {"URLHash", "EventDate"}, {Count("PageViews")}),
-            {SortKey{"PageViews", SortOrder::DESC}}, 10, 100));
+            {SortKey{"PageViews", SortOrder::DESC}}, 10, 100);
     case 42:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Filter(Scan(db_filename,
                               {"WindowClientWidth", "WindowClientHeight",
                                "CounterID", "EventDate", "IsRefresh",
@@ -806,9 +797,9 @@ ExecBatch ExecuteClickBenchQuery(const std::string& db_filename, int query_id) {
                                           2868770270353813622)})),
                   {"WindowClientWidth", "WindowClientHeight"},
                   {Count("PageViews")}),
-            {SortKey{"PageViews", SortOrder::DESC}}, 10, 10000));
+            {SortKey{"PageViews", SortOrder::DESC}}, 10, 10000);
     case 43:
-        return Collect(OrderedLimit(
+        return OrderedLimit(
             Group(Compute(
                       Filter(Scan(db_filename,
                                   {"EventTime", "CounterID", "EventDate",
@@ -836,8 +827,12 @@ ExecBatch ExecuteClickBenchQuery(const std::string& db_filename, int query_id) {
                                   EqualTo<int16_t>("DontCountHits", 0)})),
                       {DateTruncMinute("EventTime", "M")}),
                   {"M"}, {Count("PageViews")}),
-            {SortKey{"M", SortOrder::ASC}}, 10, 1000));
+            {SortKey{"M", SortOrder::ASC}}, 10, 1000);
     default:
         throw std::invalid_argument("ClickBench query id must be in range 1..43");
     }
+}
+
+ExecBatch ExecuteClickBenchQuery(const std::string& db_filename, int query_id) {
+    return Collect(MakeClickBenchQuery(db_filename, query_id));
 }

@@ -41,8 +41,9 @@ int ExportKioToCsv(const std::string& input_kiodb,
 int ExecuteQuery(const std::string& input_kiodb,
                  const std::string& query_id,
                  const std::string& output_csv) {
-    ExecBatch result = ExecuteClickBenchQuery(input_kiodb, std::stoi(query_id));
-    WriteExecBatchToCsv(result, output_csv);
+    ResultWriterOperator writer(
+        MakeClickBenchQuery(input_kiodb, std::stoi(query_id)), output_csv);
+    writer.Next();
     return 0;
 }
 }  // namespace

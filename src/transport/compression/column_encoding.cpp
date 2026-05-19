@@ -11,53 +11,52 @@
 #include "transport/compression/plain_encoding.h"
 #include "transport/compression/rle_encoding.h"
 
-const IColumnEncoding& SelectEncodingForType(Schema::Types type) {
-    static const PlainEncoding plain_encoding;
-    static const RleEncoding rle_encoding;
-    static const DictionaryEncoding dictionary_encoding;
-    static const DeltaEncoding delta_encoding;
+namespace {
+const PlainEncoding kPlainEncoding;
+const RleEncoding kRleEncoding;
+const DictionaryEncoding kDictionaryEncoding;
+const BitPackingEncoding kBitPackingEncoding;
+const DeltaEncoding kDeltaEncoding;
+const DeltaLengthByteArrayEncoding kDeltaLengthEncoding;
+}  // namespace
 
+const IColumnEncoding& GetEncoding(kio::Encoding encoding) {
+    switch (encoding) {
+    case kio::Encoding::PLAIN:
+        return kPlainEncoding;
+    case kio::Encoding::RLE:
+        return kRleEncoding;
+    case kio::Encoding::DICTIONARY:
+        return kDictionaryEncoding;
+    case kio::Encoding::BIT_PACKING:
+        return kBitPackingEncoding;
+    case kio::Encoding::DELTA:
+        return kDeltaEncoding;
+    case kio::Encoding::DELTA_LENGTH_BYTE_ARRAY:
+        return kDeltaLengthEncoding;
+    }
+
+    throw std::invalid_argument("Unsupported column encoding");
+}
+
+const IColumnEncoding& SelectEncodingForType(Schema::Types type) {
     switch (type) {
     case Schema::BIGINT:
     case Schema::INTEGER:
     case Schema::SMALLINT:
     case Schema::TIMESTAMP:
     case Schema::DATE:
-        return delta_encoding;
+        return GetEncoding(kio::Encoding::DELTA);
     case Schema::TEXT:
     case Schema::VARCHAR:
-        return dictionary_encoding;
+        return GetEncoding(kio::Encoding::DICTIONARY);
     case Schema::CHAR:
-        return rle_encoding;
+        return GetEncoding(kio::Encoding::RLE);
+    case Schema::DOUBLE:
+        return GetEncoding(kio::Encoding::PLAIN);
     }
 
-    return plain_encoding;
-}
-
-const IColumnEncoding& GetEncoding(kio::Encoding encoding) {
-    static const PlainEncoding plain_encoding;
-    static const RleEncoding rle_encoding;
-    static const DictionaryEncoding dictionary_encoding;
-    static const BitPackingEncoding bit_packing_encoding;
-    static const DeltaEncoding delta_encoding;
-    static const DeltaLengthByteArrayEncoding delta_length_encoding;
-
-    switch (encoding) {
-    case kio::Encoding::PLAIN:
-        return plain_encoding;
-    case kio::Encoding::RLE:
-        return rle_encoding;
-    case kio::Encoding::DICTIONARY:
-        return dictionary_encoding;
-    case kio::Encoding::BIT_PACKING:
-        return bit_packing_encoding;
-    case kio::Encoding::DELTA:
-        return delta_encoding;
-    case kio::Encoding::DELTA_LENGTH_BYTE_ARRAY:
-        return delta_length_encoding;
-    }
-
-    throw std::invalid_argument("Unsupported column encoding");
+    return GetEncoding(kio::Encoding::PLAIN);
 }
 
 PreparedColumn PrepareColumnForWrite(

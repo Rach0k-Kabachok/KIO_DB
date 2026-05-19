@@ -78,7 +78,8 @@ std::vector<char> DeltaEncoding::Encode(
     case Schema::CHAR:
     case Schema::TEXT:
     case Schema::VARCHAR:
-        break;
+    case Schema::DOUBLE:
+        return EncodeTypedColumn(std::get<std::vector<double>>(column));
     }
 
     throw std::invalid_argument("Delta encoding supports only numeric types");
@@ -100,6 +101,7 @@ ctp::Column DeltaEncoding::Decode(
     case Schema::CHAR:
     case Schema::TEXT:
     case Schema::VARCHAR:
+    case Schema::DOUBLE:
         break;
     }
 

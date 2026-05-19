@@ -80,6 +80,17 @@ TEST(ColumnEncodingTest, PrepareColumnUsesFixedMapping) {
     PreparedColumn char_prepared =
         PrepareColumnForWrite(chars, Schema::CHAR);
     EXPECT_EQ(char_prepared.encoding, kio::Encoding::RLE);
+
+    ctp::Column doubles{std::vector<double>{1.5, -2.25, 3.75}};
+    PreparedColumn double_prepared =
+        PrepareColumnForWrite(doubles, Schema::DOUBLE);
+    EXPECT_EQ(double_prepared.encoding, kio::Encoding::PLAIN);
+    EXPECT_EQ(double_prepared.compression, kio::Compression::NONE);
+    EXPECT_EQ(DecodeColumnForRead(
+                  double_prepared.payload, Schema::DOUBLE,
+                  double_prepared.encoding, double_prepared.compression, 3,
+                  double_prepared.uncompressed_size),
+              doubles);
 }
 
 TEST(ColumnEncodingTest, KioRoundTripsEncodedColumnsAndMetadata) {
@@ -98,6 +109,7 @@ TEST(ColumnEncodingTest, KioRoundTripsEncodedColumnsAndMetadata) {
         {"ch", "CHAR"},
         {"ts", "TIMESTAMP"},
         {"date", "DATE"},
+        {"double_col", "DOUBLE"},
     });
 
     ctp::ColumnarBatch expected = {
@@ -109,6 +121,7 @@ TEST(ColumnEncodingTest, KioRoundTripsEncodedColumnsAndMetadata) {
         ctp::Column{std::vector<char>{'a', 'a', 'b'}},
         ctp::Column{std::vector<int64_t>{1000, 1060, 1120}},
         ctp::Column{std::vector<int32_t>{10, 11, 12}},
+        ctp::Column{std::vector<double>{1.25, -2.5, 3.75}},
     };
 
     {
@@ -126,8 +139,22 @@ TEST(ColumnEncodingTest, KioRoundTripsEncodedColumnsAndMetadata) {
               kio::Encoding::DICTIONARY);
     EXPECT_EQ(metadata.row_groups[0].columns[5].encoding,
               kio::Encoding::RLE);
+    EXPECT_EQ(metadata.row_groups[0].columns[8].encoding,
+              kio::Encoding::PLAIN);
     EXPECT_EQ(metadata.row_groups[0].columns[0].compression,
               kio::Compression::NONE);
+
+    uint64_t expected_offset = 0;
+    uint64_t expected_batch_size = 0;
+    for (const auto& column : metadata.row_groups[0].columns) {
+        EXPECT_EQ(column.local_offset, expected_offset);
+        EXPECT_EQ(column.size, column.compressed_size);
+        EXPECT_EQ(column.size, column.uncompressed_size);
+        EXPECT_EQ(column.compression, kio::Compression::NONE);
+        expected_offset += column.size;
+        expected_batch_size += column.size;
+    }
+    EXPECT_EQ(metadata.row_groups[0].batch.batch_size, expected_batch_size);
 
     std::optional<KioReadBatch> actual = reader.ReadNextBatch();
     ASSERT_TRUE(actual.has_value());

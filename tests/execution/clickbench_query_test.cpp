@@ -133,7 +133,15 @@ TEST(ResultWriterTest, WritesExecBatchAsCsv) {
         schema,
         1};
 
-    WriteExecBatchToCsv(batch, output_path.string());
+    {
+        ResultWriterOperator op(
+            std::make_unique<VectorOperator>(
+                std::vector<ExecBatch>{std::move(batch)}),
+            output_path.string());
+
+        EXPECT_FALSE(op.Next().has_value());
+        EXPECT_FALSE(op.Next().has_value());
+    }
 
     std::ifstream input(output_path);
     ASSERT_TRUE(input.is_open());

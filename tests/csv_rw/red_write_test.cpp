@@ -217,7 +217,8 @@ TEST(ReadWrite, StoresSelfContainedFooterMetadata) {
     EXPECT_EQ(metadata.row_groups[0].columns[0].local_offset, 0u);
     EXPECT_EQ(metadata.row_groups[0].columns[1].local_offset,
               metadata.row_groups[0].columns[0].size);
-    EXPECT_EQ(metadata.row_groups[0].columns[0].encoding, kio::Encoding::PLAIN);
+    EXPECT_EQ(metadata.row_groups[0].columns[0].encoding,
+              kio::Encoding::DICTIONARY);
     EXPECT_EQ(metadata.row_groups[0].columns[0].compression, kio::Compression::NONE);
     EXPECT_EQ(metadata.row_groups[0].columns[1].encoding,
               kio::Encoding::DELTA);
