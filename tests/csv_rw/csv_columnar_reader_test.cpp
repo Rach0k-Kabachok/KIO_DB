@@ -66,14 +66,15 @@ TEST(CSVColumnarReaderTest, ParsesTypesAndQuotedStrings) {
     {
         std::ofstream csv(path_csv, std::ios::binary);
         ASSERT_TRUE(csv.is_open());
-        csv << "\"hello, csv\",42,7,\"1970-01-02\",\"1970-01-02 03:04:05\"\n";
-        csv << "\"quote \"\"inside\"\"\",-5,1,\"1970-02-01\","
+        csv << "\"hello, csv\",42,7,1.25,\"1970-01-02\",\"1970-01-02 03:04:05\"\n";
+        csv << "\"quote \"\"inside\"\"\",-5,1,0,\"1970-02-01\","
                "\"1970-02-01 00:00:01\"\n";
     }
 
     Schema schema({{"text_col", "string"},
                    {"big_col", "int64"},
                    {"small_col", "SMALLINT"},
+                   {"double_col", "DOUBLE"},
                    {"date_col", "DATE"},
                    {"time_col", "TIMESTAMP"}});
 
@@ -82,6 +83,7 @@ TEST(CSVColumnarReaderTest, ParsesTypesAndQuotedStrings) {
         ctp::Column{std::vector<std::string>{"hello, csv", "quote \"inside\""}},
         ctp::Column{std::vector<int64_t>{42, -5}},
         ctp::Column{std::vector<int16_t>{7, 1}},
+        ctp::Column{std::vector<double>{1.25, 0.0}},
         ctp::Column{std::vector<int32_t>{1, 31}},
         ctp::Column{std::vector<int64_t>{97445, 2678401}}};
 

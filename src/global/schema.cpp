@@ -35,6 +35,8 @@ Schema::Types Schema::ParseType(const std::string& type) {
         return TIMESTAMP;
     } else if (type == "DATE") {
         return DATE;
+    } else if (type == "DOUBLE" || type == "double" || type == "Float64") {
+        return DOUBLE;
     }
 
     throw std::invalid_argument("Invalid schema type: " + type);
@@ -58,6 +60,8 @@ std::string Schema::TypeToString(Types type) {
         return "TIMESTAMP";
     case DATE:
         return "DATE";
+    case DOUBLE:
+        return "DOUBLE";
     }
 
     throw std::invalid_argument("Invalid schema type");

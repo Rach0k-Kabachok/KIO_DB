@@ -24,8 +24,11 @@ add_library(kio_core STATIC
         global/column_operations.cpp
 
         execution/table_scan_op.cpp
+        execution/clickbench_queries.cpp
+        execution/compute_op.cpp
         execution/filter_op.cpp
         execution/project_op.cpp
+        execution/result_writer.cpp
         execution/limit_op.cpp
         execution/aggregate_operator_base.cpp
         execution/global_agr_op.cpp

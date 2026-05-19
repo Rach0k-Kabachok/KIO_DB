@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -17,6 +18,7 @@ using DistinctSet = std::variant<
     std::unordered_set<int64_t>,
     std::unordered_set<int32_t>,
     std::unordered_set<int16_t>,
+    std::unordered_set<double>,
     std::unordered_set<std::string>,
     std::unordered_set<char>,
     std::unordered_set<unsigned char>>;
@@ -25,10 +27,12 @@ Schema::Types InferAggregateResultType(AggregateOperatorBase::AggregateKind kind
                                        Schema::Types input_type) {
     switch (kind) {
     case AggregateOperatorBase::AggregateKind::COUNT:
-    case AggregateOperatorBase::AggregateKind::SUM:
-    case AggregateOperatorBase::AggregateKind::AVG:
     case AggregateOperatorBase::AggregateKind::COUNT_DISTINCT:
         return Schema::BIGINT;
+    case AggregateOperatorBase::AggregateKind::SUM:
+        return input_type == Schema::DOUBLE ? Schema::DOUBLE : Schema::BIGINT;
+    case AggregateOperatorBase::AggregateKind::AVG:
+        return Schema::DOUBLE;
     case AggregateOperatorBase::AggregateKind::MIN:
     case AggregateOperatorBase::AggregateKind::MAX:
         return input_type;
@@ -46,6 +50,8 @@ DistinctSet MakeDistinctSet(Schema::Types type) {
         return std::unordered_set<int32_t>();
     case Schema::SMALLINT:
         return std::unordered_set<int16_t>();
+    case Schema::DOUBLE:
+        return std::unordered_set<double>();
     case Schema::TEXT:
     case Schema::VARCHAR:
         return std::unordered_set<std::string>();
@@ -78,25 +84,35 @@ void AggregateOperatorBase::ExecGlobalOperation<AggregateOperatorBase::Aggregate
 template<>
 void AggregateOperatorBase::ExecGlobalOperation<AggregateOperatorBase::AggregateKind::SUM>(
         AggregateState& state, const ExecBatch& exec_batch) {
-    std::vector<int64_t>& result_values =
-        std::get<std::vector<int64_t>>(state.result);
     const ctp::Column& input = exec_batch.columns[state.column_idx];
 
-    std::visit([&result_values](const auto& values) {
+    std::visit([](auto& result_values, const auto& values) {
+        using ResultValue =
+            typename std::decay_t<decltype(result_values)>::value_type;
         using Value = typename std::decay_t<decltype(values)>::value_type;
-        if constexpr (std::is_arithmetic_v<Value>) {
+        if constexpr (std::is_arithmetic_v<ResultValue> &&
+                      std::is_arithmetic_v<Value>) {
             for (Value value : values) {
                 result_values[0] += value;
             }
         }
-    }, input);
+    }, state.result, input);
 }
 
 template<>
 void AggregateOperatorBase::ExecGlobalOperation<AggregateOperatorBase::AggregateKind::AVG>(
         AggregateState& state, const ExecBatch& exec_batch) {
-    ExecGlobalOperation<AggregateOperatorBase::AggregateKind::SUM>(state, exec_batch);
-    state.avg_count += static_cast<int64_t>(exec_batch.row_count);
+    const ctp::Column& input = exec_batch.columns[state.column_idx];
+
+    std::visit([&state](const auto& values) {
+        using Value = typename std::decay_t<decltype(values)>::value_type;
+        if constexpr (std::is_arithmetic_v<Value>) {
+            for (Value value : values) {
+                state.avg_sum += value;
+            }
+        }
+    }, input);
+    state.avg_count += exec_batch.row_count;
 }
 
 template<>
@@ -170,22 +186,30 @@ template<>
 void AggregateOperatorBase::ExecGroupOperation<AggregateOperatorBase::AggregateKind::SUM>(
         AggregateState& state, const ExecBatch& exec_batch, size_t row_idx) {
 
-    std::vector<int64_t>& result_values =
-        std::get<std::vector<int64_t>>(state.result);
     const ctp::Column& input = exec_batch.columns[state.column_idx];
 
-    std::visit([&result_values, row_idx](const auto& values) {
+    std::visit([row_idx](auto& result_values, const auto& values) {
+        using ResultValue =
+            typename std::decay_t<decltype(result_values)>::value_type;
         using Value = typename std::decay_t<decltype(values)>::value_type;
-        if constexpr (std::is_arithmetic_v<Value>) {
+        if constexpr (std::is_arithmetic_v<ResultValue> &&
+                      std::is_arithmetic_v<Value>) {
             result_values[0] += values[row_idx];
         }
-    }, input);
+    }, state.result, input);
 }
 
 template<>
 void AggregateOperatorBase::ExecGroupOperation<AggregateOperatorBase::AggregateKind::AVG>(
         AggregateState& state, const ExecBatch& exec_batch, size_t row_idx) {
-    ExecGroupOperation<AggregateOperatorBase::AggregateKind::SUM>(state, exec_batch, row_idx);
+    const ctp::Column& input = exec_batch.columns[state.column_idx];
+
+    std::visit([&state, row_idx](const auto& values) {
+        using Value = typename std::decay_t<decltype(values)>::value_type;
+        if constexpr (std::is_arithmetic_v<Value>) {
+            state.avg_sum += values[row_idx];
+        }
+    }, input);
     state.avg_count++;
 }
 
@@ -272,11 +296,15 @@ AggregateOperatorBase::MakeAggregateStates(
         result_names.push_back(aggregate.result_name);
         result_types.push_back(state.result_type);
 
-        if (aggregate.kind == AggregateOperatorBase::AggregateKind::COUNT ||
-            aggregate.kind == AggregateOperatorBase::AggregateKind::SUM ||
-            aggregate.kind == AggregateOperatorBase::AggregateKind::AVG ||
-            aggregate.kind == AggregateOperatorBase::AggregateKind::COUNT_DISTINCT) {
+        if (state.result_type == Schema::BIGINT &&
+            (aggregate.kind == AggregateOperatorBase::AggregateKind::COUNT ||
+             aggregate.kind == AggregateOperatorBase::AggregateKind::SUM ||
+             aggregate.kind == AggregateOperatorBase::AggregateKind::COUNT_DISTINCT)) {
             std::get<std::vector<int64_t>>(state.result).push_back(0);
+        } else if (state.result_type == Schema::DOUBLE &&
+                   (aggregate.kind == AggregateOperatorBase::AggregateKind::SUM ||
+                    aggregate.kind == AggregateOperatorBase::AggregateKind::AVG)) {
+            std::get<std::vector<double>>(state.result).push_back(0.0);
         }
 
         if (aggregate.kind == AggregateOperatorBase::AggregateKind::COUNT_DISTINCT) {
@@ -338,8 +366,8 @@ ctp::ColumnarBatch AggregateOperatorBase::FinalizeAggregation(
     for (size_t idx = 0; idx < aggregates_.size(); idx++) {
         if (aggregates_[idx].kind == AggregateOperatorBase::AggregateKind::AVG &&
             aggregate_states[idx].avg_count != 0) {
-            std::get<std::vector<int64_t>>(aggregate_states[idx].result)[0] /=
-                aggregate_states[idx].avg_count;
+            std::get<std::vector<double>>(aggregate_states[idx].result)[0] =
+                aggregate_states[idx].avg_sum / aggregate_states[idx].avg_count;
         } else if (aggregates_[idx].kind == AggregateOperatorBase::AggregateKind::COUNT_DISTINCT) {
             std::get<std::vector<int64_t>>(aggregate_states[idx].result)[0] =
                 DistinctCount(aggregate_states[idx].distinct_values);

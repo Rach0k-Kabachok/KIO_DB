@@ -28,6 +28,8 @@ Column MakeEmptyColumn(Schema::Types type, size_t reserve_rows) {
         return MakeTypedColumn<std::string>(reserve_rows);
     case Schema::CHAR:
         return MakeTypedColumn<char>(reserve_rows);
+    case Schema::DOUBLE:
+        return MakeTypedColumn<double>(reserve_rows);
     }
     throw std::invalid_argument("Unsupported column type");
 }
@@ -57,6 +59,10 @@ void AppendColumnValue(Column& dst, const Column& src, size_t row_idx,
     case Schema::CHAR:
         std::get<std::vector<char>>(dst).push_back(
             std::get<std::vector<char>>(src)[row_idx]);
+        break;
+    case Schema::DOUBLE:
+        std::get<std::vector<double>>(dst).push_back(
+            std::get<std::vector<double>>(src)[row_idx]);
         break;
     }
 }

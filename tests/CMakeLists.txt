@@ -7,6 +7,7 @@ add_executable(kio_db_tests
         compression/column_encoding_test.cpp
         execution/limit_op_test.cpp
         execution/aggregate_op_test.cpp
+        execution/clickbench_query_test.cpp
         execution/sort_op_test.cpp
         execution/top_k_op_test.cpp
 )

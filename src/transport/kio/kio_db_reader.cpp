@@ -83,6 +83,8 @@ ctp::Column ReadColumnByType(std::istream& input, uint64_t row_num,
         case Schema::TEXT:
         case Schema::VARCHAR:
             return ReadStringColumn(input, row_num, chunk_size);
+        case Schema::DOUBLE:
+            return ReadFixedColumn<double>(input, row_num, chunk_size);
     }
 
     throw std::runtime_error("Unsupported schema type");
@@ -122,6 +124,10 @@ const kio::RowGroupMeta& KioDbReader::GetRowGroupMeta(size_t group_idx) const {
     return metadata_.row_groups[group_idx];
 }
 
+size_t KioDbReader::GetNextRowGroupIndex() const {
+    return next_row_group_;
+}
+
 
 void KioDbReader::Reset() {
     kio_file_.clear();
@@ -129,8 +135,8 @@ void KioDbReader::Reset() {
 }
 
 void KioDbReader::ReadHeader() {
-    char magic[sizeof(kio::kMagic)]{};
-    bio::ReadBytes(kio_file_, magic, sizeof(magic));
+    std::string magic(sizeof(kio::kMagic), '\0');
+    bio::ReadBytes(kio_file_, magic.data(), magic.size());
     const uint64_t footer_offset = bio::ReadPod<uint64_t>(kio_file_);
 
     if (!std::equal(std::begin(magic), std::end(magic),

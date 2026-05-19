@@ -27,7 +27,7 @@ size_t GetColumnPayloadSize(const ctp::Column& column) {
 }
 
 size_t GetBatchPayloadSize(const ctp::ColumnarBatch& batch) {
-    size_t result = sizeof(uint64_t) * batch.size();
+    size_t result = 0;
     for (const auto& column : batch) {
         result += GetColumnPayloadSize(column);
     }
@@ -83,6 +83,9 @@ std::vector<char> SerializeColumn(
         payload = SerializeStringColumn(strings);
         break;
     }
+    case Schema::DOUBLE:
+        payload = SerializeNumericColumn(std::get<std::vector<double>>(column));
+        break;
     default:
         throw std::invalid_argument("Unsupported column type");
     }

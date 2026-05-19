@@ -66,8 +66,8 @@ TEST(ReadWrite, JustWorks) {
     {
         KioDbReader reader(path_db);
         ASSERT_NO_THROW({
-            CsvExporter exporter(reader, path_out_csv);
-            exporter.Export();
+            CsvExporter exporter(path_out_csv);
+            exporter.ExportFile(reader);
         });
     }
 
@@ -112,6 +112,32 @@ TEST(ReadWrite, RoundTripBatchAndEOF) {
     EXPECT_EQ(actual->columns, expected);
     EXPECT_EQ(actual->row_count, 3u);
     EXPECT_FALSE(reader.ReadNextBatch().has_value());
+
+    std::filesystem::remove(path_db, ec);
+}
+
+TEST(ReadWrite, RoundTripsDoubleColumns) {
+    const std::string path_db =
+        ReadWriteTestOutputPath("kio_db_double_round_trip_test.kiodb").string();
+
+    std::error_code ec;
+    std::filesystem::remove(path_db, ec);
+
+    Schema schema({{"score", "DOUBLE"}, {"id", "int64"}});
+    ctp::ColumnarBatch expected = {
+        ctp::Column{std::vector<double>{1.5, -2.25, 0.0}},
+        ctp::Column{std::vector<int64_t>{1, 2, 3}}};
+
+    {
+        KioDbWriter writer(path_db, schema);
+        ASSERT_NO_THROW(writer.WriteBatchToFile(expected));
+    }
+
+    KioDbReader reader(path_db);
+    std::optional<KioReadBatch> actual = reader.ReadNextBatch();
+    ASSERT_TRUE(actual.has_value());
+    EXPECT_EQ(actual->columns, expected);
+    EXPECT_EQ(actual->row_count, 3u);
 
     std::filesystem::remove(path_db, ec);
 }
@@ -185,9 +211,13 @@ TEST(ReadWrite, StoresSelfContainedFooterMetadata) {
     EXPECT_EQ(metadata.schema.ColumnType(1), Schema::BIGINT);
     ASSERT_EQ(metadata.row_groups.size(), 1u);
     EXPECT_EQ(metadata.row_groups[0].batch.row_num, 2u);
+    EXPECT_EQ(metadata.row_groups[0].batch.batch_start_offset,
+              sizeof(kio::kMagic) + sizeof(uint64_t));
     ASSERT_EQ(metadata.row_groups[0].columns.size(), 2u);
-    EXPECT_EQ(metadata.row_groups[0].columns[0].encoding,
-              kio::Encoding::DICTIONARY);
+    EXPECT_EQ(metadata.row_groups[0].columns[0].local_offset, 0u);
+    EXPECT_EQ(metadata.row_groups[0].columns[1].local_offset,
+              metadata.row_groups[0].columns[0].size);
+    EXPECT_EQ(metadata.row_groups[0].columns[0].encoding, kio::Encoding::PLAIN);
     EXPECT_EQ(metadata.row_groups[0].columns[0].compression, kio::Compression::NONE);
     EXPECT_EQ(metadata.row_groups[0].columns[1].encoding,
               kio::Encoding::DELTA);

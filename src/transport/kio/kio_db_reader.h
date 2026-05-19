@@ -21,6 +21,7 @@ public:
     const Schema& GetSchema() const;
     const kio::FileMetadata& GetMetadata() const;
     const kio::RowGroupMeta& GetRowGroupMeta(size_t group_idx) const;
+    size_t GetNextRowGroupIndex() const;
 
     std::optional<KioReadBatch> ReadNextBatch();
 

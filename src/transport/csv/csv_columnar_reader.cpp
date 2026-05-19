@@ -47,6 +47,9 @@ ctp::ColumnarBatch CSVColumnarReader::MakeEmptyBatch(size_t reserve_rows) const 
         case Schema::CHAR:
             AddTypedColumn<char>(batch, reserve_rows);
             break;
+        case Schema::DOUBLE:
+            AddTypedColumn<double>(batch, reserve_rows);
+            break;
         }
     }
 
@@ -58,15 +61,15 @@ void CSVColumnarReader::AppendField(ctp::ColumnarBatch& batch, size_t col_idx,
     switch (schema_.ColumnType(col_idx)) {
     case Schema::BIGINT:
         std::get<std::vector<int64_t>>(batch[col_idx]).push_back(
-            csv::ParseInteger<int64_t>(field));
+            csv::ParseNum<int64_t>(field));
         break;
     case Schema::INTEGER:
         std::get<std::vector<int32_t>>(batch[col_idx]).push_back(
-            csv::ParseInteger<int32_t>(field));
+            csv::ParseNum<int32_t>(field));
         break;
     case Schema::SMALLINT:
         std::get<std::vector<int16_t>>(batch[col_idx]).push_back(
-            csv::ParseInteger<int16_t>(field));
+            csv::ParseNum<int16_t>(field));
         break;
     case Schema::TEXT:
     case Schema::VARCHAR:
@@ -86,6 +89,10 @@ void CSVColumnarReader::AppendField(ctp::ColumnarBatch& batch, size_t col_idx,
     case Schema::DATE:
         std::get<std::vector<int32_t>>(batch[col_idx]).push_back(
             csv::DateToDays(field));
+        break;
+    case Schema::DOUBLE:
+        std::get<std::vector<double>>(batch[col_idx]).push_back(
+            csv::ParseNum<double>(field));
         break;
     }
 }
