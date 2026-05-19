@@ -4,6 +4,7 @@ add_library(kio_core STATIC
         transport/csv/csv_columnar_reader.cpp
         transport/csv/csv_exporter.cpp
 
+        transport/compression/binary_codec.cpp
         transport/compression/bit_packing_encoding.cpp
         transport/compression/column_encoding.cpp
         transport/compression/compression_codec.cpp
@@ -15,6 +16,7 @@ add_library(kio_core STATIC
         transport/compression/rle_encoding.cpp
 
         transport/kio/kio_db_importer.cpp
+        transport/kio/binary_io.cpp
         transport/kio/kio_db_reader.cpp
         transport/kio/kio_db_writer.cpp
         transport/kio/kio_serialization.cpp

@@ -92,8 +92,10 @@ CsvExporter::CsvExporter(const std::string& csv_filename) {
 }
 
 void CsvExporter::ExportFile(KioDbReader& reader) {
-    while (std::optional<KioReadBatch> batch = reader.ReadNextBatch()) {
-        ExportBatch(reader.GetSchema(), batch->columns, batch->row_count);
+    while (std::optional<ctp::ColumnarBatch> batch = reader.ReadNextBatch()) {
+        ExportBatch(reader.GetSchema(), 
+            batch.value(), 
+            reader.GetRowGroupMeta().batch.row_num);
     }
 }
 

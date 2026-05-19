@@ -4,6 +4,7 @@
 #include <istream>
 #include <ostream>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 
 namespace bio {
@@ -29,26 +30,9 @@ void WritePod(std::ostream& output, const T& value) {
     }
 }
 
-inline void ReadBytes(std::istream& input, char* data, uint64_t size) {
-    if (size == 0) {
-        return;
-    }
-
-    input.read(data, static_cast<std::streamsize>(size));
-    if (!input) {
-        throw std::runtime_error("Failed to read bytes");
-    }
-}
-
-inline void WriteBytes(std::ostream& output, const char* data, uint64_t size) {
-    if (size == 0) {
-        return;
-    }
-
-    output.write(data, static_cast<std::streamsize>(size));
-    if (!output.good()) {
-        throw std::runtime_error("Failed to write bytes");
-    }
-}
+void ReadBytes(std::istream& input, char* data, uint64_t size);
+void WriteBytes(std::ostream& output, const char* data, uint64_t size);
+std::string ReadString(std::istream& input);
+void WriteString(std::ostream& output, const std::string& value);
 
 }  // namespace bio

@@ -27,12 +27,6 @@ struct SerializedColumnChunk {
     std::vector<char> payload;
 };
 
-void WriteString(std::ostream& output, const std::string& value) {
-    const uint64_t size = value.size();
-    bio::WritePod(output, size);
-    bio::WriteBytes(output, value.data(), size);
-}
-
 template <typename T>
 std::string FormatStatsValue(T value) {
     if constexpr (std::is_floating_point_v<T>) {
@@ -91,7 +85,7 @@ uint64_t GetEncodedBatchSize(
     }
     return result;
 }
-}  // namespace
+} // namespace
 
 KioDbWriter::KioDbWriter(const std::string& output_filename, const Schema& schema)
     : metadata_{schema, 0, {}} {
@@ -111,10 +105,62 @@ KioDbWriter::~KioDbWriter() {
     }
 }
 
+void KioDbWriter::WriteBatchToFile(const ctp::ColumnarBatch& batch) {
+    if (finalized_) {
+        throw std::runtime_error("Cannot write to finalized KIO file");
+    }
+
+    if (batch.empty()) {
+        return;
+    }
+
+    kio::RowGroupMeta row_group;
+    row_group.batch = MakeBatchMeta(batch);
+    row_group.columns = WriteColumns(batch);
+    row_group.batch.batch_size = GetEncodedBatchSize(row_group.columns);
+
+    metadata_.row_count += row_group.batch.row_num;
+    metadata_.row_groups.push_back(std::move(row_group));
+}
+
+
+
+void KioDbWriter::Finalize() {
+    if (finalized_ || !kio_file_.is_open()) {
+        return;
+    }
+
+    const std::streampos footer_pos = kio_file_.tellp();
+    if (footer_pos == std::streampos(-1)) {
+        throw std::runtime_error("Failed to get footer position");
+    }
+
+    const uint64_t footer_offset = static_cast<uint64_t>(footer_pos);
+    WriteFooter();
+
+    const std::streampos end_pos = kio_file_.tellp();
+    kio_file_.seekp(kFooterOffsetPosition);
+    bio::WritePod(kio_file_, footer_offset);
+    kio_file_.seekp(end_pos);
+    kio_file_.flush();
+    finalized_ = true;
+}
+
 void KioDbWriter::WriteHeader() {
     const uint64_t footer_offset = 0;
     bio::WriteBytes(kio_file_, kio::kMagic, sizeof(kio::kMagic));
     bio::WritePod(kio_file_, footer_offset);
+}
+
+void KioDbWriter::WriteFooter() {
+    bio::WritePod(kio_file_, metadata_.row_count);
+    WriteSchema();
+
+    bio::WritePod(kio_file_,
+                  static_cast<uint64_t>(metadata_.row_groups.size()));
+    for (const kio::RowGroupMeta& row_group : metadata_.row_groups) {
+        WriteRowGroupMeta(row_group);
+    }
 }
 
 kio::BatchMeta KioDbWriter::MakeBatchMeta(const ctp::ColumnarBatch& batch) {
@@ -163,77 +209,33 @@ std::vector<kio::ColumnChunkInfo> KioDbWriter::WriteColumns(
     return column_infos;
 }
 
-void KioDbWriter::WriteBatchToFile(const ctp::ColumnarBatch& batch) {
-    if (finalized_) {
-        throw std::runtime_error("Cannot write to finalized KIO file");
-    }
-
-    if (batch.empty()) {
-        return;
-    }
-
-    kio::RowGroupMeta row_group;
-    row_group.batch = MakeBatchMeta(batch);
-    row_group.columns = WriteColumns(batch);
-    row_group.batch.batch_size = GetEncodedBatchSize(row_group.columns);
-
-    metadata_.row_count += row_group.batch.row_num;
-    metadata_.row_groups.push_back(std::move(row_group));
-}
-
-void KioDbWriter::WriteFooter() {
-    bio::WritePod(kio_file_, metadata_.row_count);
-
+void KioDbWriter::WriteSchema() {
     const uint64_t column_count = metadata_.schema.ColumnCount();
     bio::WritePod(kio_file_, column_count);
     for (uint64_t i = 0; i < column_count; ++i) {
-        WriteString(kio_file_, metadata_.schema.ColumnName(i));
-        const uint8_t type = metadata_.schema.ColumnType(i);
-        bio::WritePod(kio_file_, type);
-    }
-
-    const uint64_t row_group_count = metadata_.row_groups.size();
-    bio::WritePod(kio_file_, row_group_count);
-    for (const auto& row_group : metadata_.row_groups) {
-        bio::WritePod(kio_file_, row_group.batch);
-
-        const uint64_t chunk_count = row_group.columns.size();
-        bio::WritePod(kio_file_, chunk_count);
-        for (const auto& chunk : row_group.columns) {
-            bio::WritePod(kio_file_, chunk.local_offset);
-            bio::WritePod(kio_file_, chunk.size);
-            bio::WritePod(kio_file_, chunk.compressed_size);
-            bio::WritePod(kio_file_, chunk.uncompressed_size);
-
-            const uint8_t encoding = static_cast<uint8_t>(chunk.encoding);
-            const uint8_t compression = static_cast<uint8_t>(chunk.compression);
-            const uint8_t has_min_max = chunk.has_min_max ? 1 : 0;
-            bio::WritePod(kio_file_, encoding);
-            bio::WritePod(kio_file_, compression);
-            bio::WritePod(kio_file_, has_min_max);
-            WriteString(kio_file_, chunk.min_value);
-            WriteString(kio_file_, chunk.max_value);
-        }
+        bio::WriteString(kio_file_, metadata_.schema.ColumnName(i));
+        bio::WritePod(kio_file_, static_cast<uint8_t>(metadata_.schema.ColumnType(i)));
     }
 }
 
-void KioDbWriter::Finalize() {
-    if (finalized_ || !kio_file_.is_open()) {
-        return;
+void KioDbWriter::WriteColumnChunkInfo(const kio::ColumnChunkInfo& chunk) {
+    bio::WritePod(kio_file_, chunk.local_offset);
+    bio::WritePod(kio_file_, chunk.size);
+    bio::WritePod(kio_file_, chunk.compressed_size);
+    bio::WritePod(kio_file_, chunk.uncompressed_size);
+
+    bio::WritePod(kio_file_, static_cast<uint8_t>(chunk.encoding));
+    bio::WritePod(kio_file_, static_cast<uint8_t>(chunk.compression));
+    bio::WritePod(kio_file_, static_cast<uint8_t>(chunk.has_min_max ? 1 : 0));
+    bio::WriteString(kio_file_, chunk.min_value);
+    bio::WriteString(kio_file_, chunk.max_value);
+}
+
+void KioDbWriter::WriteRowGroupMeta(const kio::RowGroupMeta& row_group) {
+    bio::WritePod(kio_file_, row_group.batch);
+
+    bio::WritePod(kio_file_, static_cast<uint64_t>(row_group.columns.size()));
+    for (const kio::ColumnChunkInfo& chunk : row_group.columns) {
+        WriteColumnChunkInfo(chunk);
     }
-
-    const std::streampos footer_pos = kio_file_.tellp();
-    if (footer_pos == std::streampos(-1)) {
-        throw std::runtime_error("Failed to get footer position");
-    }
-
-    const uint64_t footer_offset = static_cast<uint64_t>(footer_pos);
-    WriteFooter();
-
-    const std::streampos end_pos = kio_file_.tellp();
-    kio_file_.seekp(kFooterOffsetPosition);
-    bio::WritePod(kio_file_, footer_offset);
-    kio_file_.seekp(end_pos);
-    kio_file_.flush();
-    finalized_ = true;
 }

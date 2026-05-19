@@ -23,6 +23,10 @@ private:
     kio::BatchMeta MakeBatchMeta(const ctp::ColumnarBatch& batch);
     std::vector<kio::ColumnChunkInfo> WriteColumns(
         const ctp::ColumnarBatch& batch);
+    
+    void WriteSchema();
+    void WriteColumnChunkInfo(const kio::ColumnChunkInfo& chunk);
+    void WriteRowGroupMeta(const kio::RowGroupMeta& row_group);
 
     std::ofstream kio_file_;
 
