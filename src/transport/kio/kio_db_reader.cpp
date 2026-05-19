@@ -71,17 +71,19 @@ ctp::Column ReadColumnByType(std::istream& input, uint64_t row_num,
     switch (type) {
         case Schema::BIGINT:
         case Schema::TIMESTAMP:
-            return ReadFixedColumn<int64_t>(input, row_num, chunk_meta);
+            return ReadFixedColumn<int64_t>(input, row_num, chunk_size);
         case Schema::INTEGER:
         case Schema::DATE:
-            return ReadFixedColumn<int32_t>(input, row_num, chunk_meta);
+            return ReadFixedColumn<int32_t>(input, row_num, chunk_size);
         case Schema::SMALLINT:
-            return ReadFixedColumn<int16_t>(input, row_num, chunk_meta);
+            return ReadFixedColumn<int16_t>(input, row_num, chunk_size);
         case Schema::CHAR:
-            return ReadFixedColumn<char>(input, row_num, chunk_meta);
+            return ReadFixedColumn<char>(input, row_num, chunk_size);
         case Schema::TEXT:
         case Schema::VARCHAR:
-            return ReadStringColumn(input, row_num, chunk_meta);
+            return ReadStringColumn(input, row_num, chunk_size);
+        case Schema::DOUBLE:
+            return ReadFixedColumn<double>(input, row_num, chunk_size);
     }
 
     throw std::runtime_error("Unsupported schema type");
@@ -132,6 +134,10 @@ const kio::RowGroupMeta& KioDbReader::GetRowGroupMeta(size_t group_idx) const {
     return metadata_.row_groups[group_idx];
 }
 
+size_t KioDbReader::GetNextRowGroupIndex() const {
+    return next_row_group_;
+}
+
 
 void KioDbReader::Reset() {
     kio_file_.clear();
@@ -139,8 +145,8 @@ void KioDbReader::Reset() {
 }
 
 void KioDbReader::ReadHeader() {
-    char magic[sizeof(kio::kMagic)]{};
-    bio::ReadBytes(kio_file_, magic, sizeof(magic));
+    std::string magic(sizeof(kio::kMagic), '\0');
+    bio::ReadBytes(kio_file_, magic.data(), magic.size());
     const uint64_t footer_offset = bio::ReadPod<uint64_t>(kio_file_);
 
     if (!std::equal(std::begin(magic), std::end(magic),
@@ -246,7 +252,7 @@ std::optional<KioReadBatch> KioDbReader::ReadNextBatch(
 
         batch.emplace_back(
             ReadColumnFromFile(kio_file_, row_group.batch.row_num,
-                               metadata_.schema.ColumnType(col_idx)));
+                               metadata_.schema.ColumnType(col_idx), chunk));
     }
 
     return KioReadBatch{std::move(batch), row_group.batch.row_num};

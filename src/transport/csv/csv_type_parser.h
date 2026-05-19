@@ -18,37 +18,30 @@ constexpr int64_t kSecondsPerDay =
     kHoursPerDay * kMinutesPerHour * kSecondsPerMinute;
 
 template <typename T>
-T ParseInteger(std::string_view value) {
+T ParseNum(std::string_view value) {
     T result{};
     const char* begin = value.data();
     const char* end = value.data() + value.size();
     auto [ptr, ec] = std::from_chars(begin, end, result);
     if (ec != std::errc{} || ptr != end) {
-        throw std::invalid_argument("Invalid integer value");
-    }
-    return result;
-}
-
-inline int64_t ParseDigits(std::string_view value, size_t pos, size_t len) {
-    int64_t result = 0;
-    for (size_t i = 0; i < len; ++i) {
-        result = result * 10 + value[pos + i] - '0';
+        throw std::invalid_argument("Invalid num value");
     }
     return result;
 }
 
 inline int64_t DateToDays(std::string_view date) {
-    int64_t year = ParseDigits(date, 0, 4) - kBaseYear;
-    int64_t month = ParseDigits(date, 5, 2) - 1;
-    int64_t day = ParseDigits(date, 8, 2) - 1;
+    int64_t year = ParseNum<int64_t>(std::string_view(date.data(), 4)) -
+                   kBaseYear;
+    int64_t month = ParseNum<int64_t>(std::string_view(date.data() + 5, 2)) - 1;
+    int64_t day = ParseNum<int64_t>(std::string_view(date.data() + 8, 2)) - 1;
 
     return (year * kMonthsPerYear + month) * kDaysPerMonth + day;
 }
 
 inline int64_t TimeToSeconds(std::string_view time) {
-    int64_t hour = ParseDigits(time, 11, 2);
-    int64_t minute = ParseDigits(time, 14, 2);
-    int64_t second = ParseDigits(time, 17, 2);
+    int64_t hour = ParseNum<int64_t>(std::string_view(time.data() + 11, 2));
+    int64_t minute = ParseNum<int64_t>(std::string_view(time.data() + 14, 2));
+    int64_t second = ParseNum<int64_t>(std::string_view(time.data() + 17, 2));
 
     return DateToDays(time) * kSecondsPerDay +
            hour * kMinutesPerHour * kSecondsPerMinute +
