@@ -16,7 +16,7 @@ template <typename T>
 std::vector<char> EncodeTypedColumn(const std::vector<T>& values) {
     std::vector<char> result;
     if (values.empty()) {
-        AppendPod(result, uint64_t{0});
+        bcodec::AppendPod(result, uint64_t{0});
         return result;
     }
 
@@ -36,10 +36,10 @@ std::vector<char> EncodeTypedColumn(const std::vector<T>& values) {
     }
     runs.emplace_back(current, run_length);
 
-    AppendPod(result, static_cast<uint64_t>(runs.size()));
+    bcodec::AppendPod(result, static_cast<uint64_t>(runs.size()));
     for (const auto& [value, length] : runs) {
-        AppendPod(result, value);
-        AppendPod(result, length);
+        bcodec::AppendPod(result, value);
+        bcodec::AppendPod(result, length);
     }
 
     return result;
@@ -48,7 +48,7 @@ std::vector<char> EncodeTypedColumn(const std::vector<T>& values) {
 std::vector<char> EncodeStringColumn(const std::vector<std::string>& values) {
     std::vector<char> result;
     if (values.empty()) {
-        AppendPod(result, uint64_t{0});
+        bcodec::AppendPod(result, uint64_t{0});
         return result;
     }
 
@@ -68,10 +68,10 @@ std::vector<char> EncodeStringColumn(const std::vector<std::string>& values) {
     }
     runs.emplace_back(std::move(current), run_length);
 
-    AppendPod(result, static_cast<uint64_t>(runs.size()));
+    bcodec::AppendPod(result, static_cast<uint64_t>(runs.size()));
     for (const auto& [value, length] : runs) {
-        AppendString(result, value);
-        AppendPod(result, length);
+        bcodec::AppendString(result, value);
+        bcodec::AppendPod(result, length);
     }
 
     return result;
@@ -82,14 +82,14 @@ ctp::Column DecodeTypedColumn(const std::vector<char>& payload,
                               uint64_t row_count) {
     size_t offset = 0;
     const uint64_t run_count =
-        ReadPod<uint64_t>(payload, offset);
+        bcodec::ReadPod<uint64_t>(payload, offset);
 
     std::vector<T> result;
     result.reserve(row_count);
     for (uint64_t idx = 0; idx < run_count; ++idx) {
-        const T value = ReadPod<T>(payload, offset);
+        const T value = bcodec::ReadPod<T>(payload, offset);
         const uint64_t length =
-            ReadPod<uint64_t>(payload, offset);
+            bcodec::ReadPod<uint64_t>(payload, offset);
         result.insert(result.end(), length, value);
     }
 
@@ -100,15 +100,15 @@ ctp::Column DecodeStringColumn(const std::vector<char>& payload,
                                uint64_t row_count) {
     size_t offset = 0;
     const uint64_t run_count =
-        ReadPod<uint64_t>(payload, offset);
+        bcodec::ReadPod<uint64_t>(payload, offset);
 
     std::vector<std::string> result;
     result.reserve(row_count);
     for (uint64_t idx = 0; idx < run_count; ++idx) {
         const std::string value =
-            ReadString(payload, offset);
+            bcodec::ReadString(payload, offset);
         const uint64_t length =
-            ReadPod<uint64_t>(payload, offset);
+            bcodec::ReadPod<uint64_t>(payload, offset);
         result.insert(result.end(), length, value);
     }
 

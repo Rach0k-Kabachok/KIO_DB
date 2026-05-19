@@ -61,7 +61,7 @@ std::vector<char> EncodeUnsignedValues(const std::vector<uint64_t>& values) {
     const uint8_t bit_width = ComputeBitWidth(max_value);
 
     std::vector<char> result;
-    AppendPod(result, bit_width);
+    bcodec::AppendPod(result, bit_width);
     if (bit_width == 0 || values.empty()) {
         return result;
     }
@@ -89,7 +89,7 @@ std::vector<uint64_t> DecodeUnsignedValues(
     const std::vector<char>& payload,
     size_t& offset,
     uint64_t value_count) {
-    const uint8_t bit_width = ReadPod<uint8_t>(payload, offset);
+    const uint8_t bit_width = bcodec::ReadPod<uint8_t>(payload, offset);
 
     std::vector<uint64_t> result(value_count, 0);
     if (bit_width == 0 || value_count == 0) {

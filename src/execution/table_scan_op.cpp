@@ -1,9 +1,9 @@
 #include "execution/operators.h"
 
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -12,7 +12,7 @@
 
 namespace {
 
-VarType ParseMinMaxValue(const std::string& value, Schema::Types type) {
+scalar::Value ParseMinMaxValue(const std::string& value, Schema::Types type) {
     switch (type) {
     case Schema::BIGINT:
     case Schema::TIMESTAMP:
@@ -34,45 +34,34 @@ VarType ParseMinMaxValue(const std::string& value, Schema::Types type) {
     throw std::invalid_argument("Unsupported min/max type");
 }
 
-int CompareValues(const VarType& lhs, const VarType& rhs) {
-    return std::visit([&rhs](const auto& lhs_value) {
-        using Value = std::decay_t<decltype(lhs_value)>;
-        const Value& rhs_value = std::get<Value>(rhs);
-        if (lhs_value == rhs_value) {
-            return 0;
-        }
-        return lhs_value < rhs_value ? -1 : 1;
-    }, lhs);
-}
-
 bool ConstraintMayMatch(const kio::ColumnChunkInfo& chunk,
                         const MinMaxConstraint& constraint) {
     if (!chunk.has_min_max) {
         return true;
     }
 
-    const VarType min_value =
+    const scalar::Value min_value =
         ParseMinMaxValue(chunk.min_value, constraint.type);
-    const VarType max_value =
+    const scalar::Value max_value =
         ParseMinMaxValue(chunk.max_value, constraint.type);
 
     if (constraint.lower.has_value()) {
-        const int cmp = CompareValues(max_value, *constraint.lower);
+        const int cmp = scalar::Compare(max_value, *constraint.lower);
         if (cmp < 0 || (cmp == 0 && !constraint.lower_inclusive)) {
             return false;
         }
     }
 
     if (constraint.upper.has_value()) {
-        const int cmp = CompareValues(min_value, *constraint.upper);
+        const int cmp = scalar::Compare(min_value, *constraint.upper);
         if (cmp > 0 || (cmp == 0 && !constraint.upper_inclusive)) {
             return false;
         }
     }
 
     if (constraint.not_equal &&
-        CompareValues(min_value, constraint.not_equal_value) == 0 &&
-        CompareValues(max_value, constraint.not_equal_value) == 0) {
+        scalar::Compare(min_value, constraint.not_equal_value) == 0 &&
+        scalar::Compare(max_value, constraint.not_equal_value) == 0) {
         return false;
     }
 
@@ -120,22 +109,28 @@ TableScanOperator::TableScanOperator(
 
 std::optional<ExecBatch> TableScanOperator::Next() {
     if (constraints_) {
-        const auto& row_groups = reader_.GetMetadata().row_groups;
-        while (reader_.GetNextRowGroupIndex() < row_groups.size()) {
-            const size_t group_idx = reader_.GetNextRowGroupIndex();
+        const kio::RowGroupMeta* row_group = reader_.PeekNextRowGroup();
+        while (row_group != nullptr) {
             if (RowGroupMayMatch(reader_.GetSchema(),
-                                 reader_.GetRowGroupMeta(group_idx),
-                                 *constraints_)) {
+                                 *row_group, *constraints_)) {
                 break;
             }
             reader_.SkipNextBatch();
+            row_group = reader_.PeekNextRowGroup();
         }
     }
-    
-    std::optional<KioReadBatch> batch = reader_.ReadNextBatch(column_indices_);
-    if (!batch.has_value()) {
+
+    const kio::RowGroupMeta* row_group = reader_.PeekNextRowGroup();
+    if (row_group == nullptr) {
+        return std::nullopt;
+    }
+    const size_t row_count = row_group->batch.row_num;
+
+    std::optional<ctp::ColumnarBatch> columns =
+        reader_.ReadNextBatch(column_indices_);
+    if (!columns.has_value()) {
         return std::nullopt;
     }
 
-    return ExecBatch{std::move(batch->columns), output_schema_, batch->row_count};
+    return ExecBatch{std::move(*columns), output_schema_, row_count};
 }

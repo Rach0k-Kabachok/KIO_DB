@@ -31,7 +31,7 @@ std::vector<char> EncodeStringColumn(
     }
 
     std::vector<char> result;
-    AppendPod(
+    bcodec::AppendPod(
         result, static_cast<uint64_t>(dictionary.size()));
 
     std::vector<char> dictionary_payload =
@@ -74,7 +74,7 @@ ctp::Column DecodeStringColumn(const std::vector<char>& payload,
                                uint64_t row_count) {
     size_t offset = 0;
     const uint64_t dictionary_size =
-        ReadPod<uint64_t>(payload, offset);
+        bcodec::ReadPod<uint64_t>(payload, offset);
     std::vector<std::string> dictionary =
         DecodeDictionary(payload, offset, dictionary_size);
     std::vector<uint64_t> ids =

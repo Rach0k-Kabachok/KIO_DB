@@ -1,10 +1,13 @@
 #include "execution/clickbench_queries.h"
 
 #include <cstdint>
+#include <functional>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -59,8 +62,7 @@ ExecBatch Collect(OperatorPtr op) {
             for (size_t col_idx = 0; col_idx < batch.columns.size(); col_idx++) {
                 ctp::AppendColumnValue(result.columns[col_idx],
                                        batch.columns[col_idx],
-                                       row_idx,
-                                       result.schema->ColumnType(col_idx));
+                                       row_idx);
             }
             result.row_count++;
         }
@@ -74,52 +76,42 @@ const std::vector<T>& Values(const ExecBatch& batch, size_t column_idx) {
     return ctp::GetColumnData<T>(batch.columns[column_idx]);
 }
 
-template <typename T>
-Predicate EqualTo(std::string column_name, T value) {
+template <typename T, typename Comparator>
+Predicate CompareColumn(std::string column_name, T value,
+                        Comparator comparator) {
     return [column_name = std::move(column_name), value,
+            comparator = std::move(comparator),
             column_idx = std::optional<size_t>{}](
                const ExecBatch& batch, size_t row_idx) mutable {
         if (!column_idx.has_value()) {
             column_idx = batch.schema->ColumnIndex(column_name);
         }
-        return Values<T>(batch, *column_idx)[row_idx] == value;
+        return comparator(Values<T>(batch, *column_idx)[row_idx], value);
     };
+}
+
+template <typename T>
+Predicate EqualTo(std::string column_name, T value) {
+    return CompareColumn(
+        std::move(column_name), value, std::equal_to<T>{});
 }
 
 template <typename T>
 Predicate NotEqualTo(std::string column_name, T value) {
-    return [column_name = std::move(column_name), value,
-            column_idx = std::optional<size_t>{}](
-               const ExecBatch& batch, size_t row_idx) mutable {
-        if (!column_idx.has_value()) {
-            column_idx = batch.schema->ColumnIndex(column_name);
-        }
-        return Values<T>(batch, *column_idx)[row_idx] != value;
-    };
+    return CompareColumn(
+        std::move(column_name), value, std::not_equal_to<T>{});
 }
 
 template <typename T>
 Predicate GreaterEqual(std::string column_name, T value) {
-    return [column_name = std::move(column_name), value,
-            column_idx = std::optional<size_t>{}](
-               const ExecBatch& batch, size_t row_idx) mutable {
-        if (!column_idx.has_value()) {
-            column_idx = batch.schema->ColumnIndex(column_name);
-        }
-        return Values<T>(batch, *column_idx)[row_idx] >= value;
-    };
+    return CompareColumn(
+        std::move(column_name), value, std::greater_equal<T>{});
 }
 
 template <typename T>
 Predicate LessEqual(std::string column_name, T value) {
-    return [column_name = std::move(column_name), value,
-            column_idx = std::optional<size_t>{}](
-               const ExecBatch& batch, size_t row_idx) mutable {
-        if (!column_idx.has_value()) {
-            column_idx = batch.schema->ColumnIndex(column_name);
-        }
-        return Values<T>(batch, *column_idx)[row_idx] <= value;
-    };
+    return CompareColumn(
+        std::move(column_name), value, std::less_equal<T>{});
 }
 
 Predicate StringNotEmpty(std::string column_name) {
@@ -251,19 +243,19 @@ AggregateSpec CountDistinct(std::string column, std::string name) {
 }
 
 MinMaxConstraint EqConstraint(std::string column, Schema::Types type,
-                              VarType value) {
+                              scalar::Value value) {
     return MinMaxConstraint{
         std::move(column), type, value, value, true, true, false, int64_t{0}};
 }
 
 MinMaxConstraint BetweenConstraint(std::string column, Schema::Types type,
-                                   VarType lower, VarType upper) {
+                                   scalar::Value lower, scalar::Value upper) {
     return MinMaxConstraint{
         std::move(column), type, lower, upper, true, true, false, int64_t{0}};
 }
 
 MinMaxConstraint NotEqConstraint(std::string column, Schema::Types type,
-                                 VarType value) {
+                                 scalar::Value value) {
     return MinMaxConstraint{
         std::move(column), type, std::nullopt, std::nullopt,
         true, true, true, value};
@@ -312,11 +304,12 @@ ComputeOperator::ComputedColumnSpec StringLength(std::string column,
     return ComputeOperator::ComputedColumnSpec{
         std::move(result), Schema::BIGINT,
         [column = std::move(column), column_idx = std::optional<size_t>{}](
-            const ExecBatch& batch, size_t row_idx) mutable -> VarType {
+            const ExecBatch& batch, size_t row_idx) mutable -> scalar::Value {
             if (!column_idx.has_value()) {
                 column_idx = batch.schema->ColumnIndex(column);
             }
-            return int64_t(Values<std::string>(batch, *column_idx)[row_idx].size());
+            return static_cast<int64_t>(
+                Values<std::string>(batch, *column_idx)[row_idx].size());
         }};
 }
 
@@ -327,7 +320,7 @@ ComputeOperator::ComputedColumnSpec Int32Minus(std::string column,
         std::move(result), Schema::INTEGER,
         [column = std::move(column), value,
          column_idx = std::optional<size_t>{}](
-            const ExecBatch& batch, size_t row_idx) mutable -> VarType {
+            const ExecBatch& batch, size_t row_idx) mutable -> scalar::Value {
             if (!column_idx.has_value()) {
                 column_idx = batch.schema->ColumnIndex(column);
             }
@@ -342,11 +335,12 @@ ComputeOperator::ComputedColumnSpec SmallIntPlus(std::string column,
         std::move(result), Schema::BIGINT,
         [column = std::move(column), value,
          column_idx = std::optional<size_t>{}](
-            const ExecBatch& batch, size_t row_idx) mutable -> VarType {
+            const ExecBatch& batch, size_t row_idx) mutable -> scalar::Value {
             if (!column_idx.has_value()) {
                 column_idx = batch.schema->ColumnIndex(column);
             }
-            return int64_t(Values<int16_t>(batch, *column_idx)[row_idx]) + value;
+            return static_cast<int64_t>(
+                Values<int16_t>(batch, *column_idx)[row_idx]) + value;
         }};
 }
 
@@ -355,11 +349,12 @@ ComputeOperator::ComputedColumnSpec MinuteColumn(std::string column,
     return ComputeOperator::ComputedColumnSpec{
         std::move(result), Schema::BIGINT,
         [column = std::move(column), column_idx = std::optional<size_t>{}](
-            const ExecBatch& batch, size_t row_idx) mutable -> VarType {
+            const ExecBatch& batch, size_t row_idx) mutable -> scalar::Value {
             if (!column_idx.has_value()) {
                 column_idx = batch.schema->ColumnIndex(column);
             }
-            return MinuteOfTimestamp(Values<int64_t>(batch, *column_idx)[row_idx]);
+            return MinuteOfTimestamp(
+                Values<int64_t>(batch, *column_idx)[row_idx]);
         }};
 }
 
@@ -368,11 +363,12 @@ ComputeOperator::ComputedColumnSpec DateTruncMinute(std::string column,
     return ComputeOperator::ComputedColumnSpec{
         std::move(result), Schema::TIMESTAMP,
         [column = std::move(column), column_idx = std::optional<size_t>{}](
-            const ExecBatch& batch, size_t row_idx) mutable -> VarType {
+            const ExecBatch& batch, size_t row_idx) mutable -> scalar::Value {
             if (!column_idx.has_value()) {
                 column_idx = batch.schema->ColumnIndex(column);
             }
-            return TruncateToMinute(Values<int64_t>(batch, *column_idx)[row_idx]);
+            return TruncateToMinute(
+                Values<int64_t>(batch, *column_idx)[row_idx]);
         }};
 }
 
@@ -381,18 +377,19 @@ ComputeOperator::ComputedColumnSpec DomainColumn(std::string column,
     return ComputeOperator::ComputedColumnSpec{
         std::move(result), Schema::TEXT,
         [column = std::move(column), column_idx = std::optional<size_t>{}](
-            const ExecBatch& batch, size_t row_idx) mutable -> VarType {
+            const ExecBatch& batch, size_t row_idx) mutable -> scalar::Value {
             if (!column_idx.has_value()) {
                 column_idx = batch.schema->ColumnIndex(column);
             }
-            return RefererDomain(Values<std::string>(batch, *column_idx)[row_idx]);
+            return RefererDomain(
+                Values<std::string>(batch, *column_idx)[row_idx]);
         }};
 }
 
 ComputeOperator::ComputedColumnSpec ConstantOne() {
     return ComputeOperator::ComputedColumnSpec{
         "one", Schema::BIGINT,
-        [](const ExecBatch&, size_t) -> VarType { return int64_t{1}; }};
+        [](const ExecBatch&, size_t) -> scalar::Value { return int64_t{1}; }};
 }
 
 ComputeOperator::ComputedColumnSpec CaseSource() {
@@ -401,7 +398,7 @@ ComputeOperator::ComputedColumnSpec CaseSource() {
         [search_idx = std::optional<size_t>{},
          adv_idx = std::optional<size_t>{},
          referer_idx = std::optional<size_t>{}](
-            const ExecBatch& batch, size_t row_idx) mutable -> VarType {
+            const ExecBatch& batch, size_t row_idx) mutable -> scalar::Value {
             if (!search_idx.has_value()) {
                 search_idx = batch.schema->ColumnIndex("SearchEngineID");
                 adv_idx = batch.schema->ColumnIndex("AdvEngineID");
@@ -419,7 +416,7 @@ ComputeOperator::ComputedColumnSpec UrlDestination() {
     return ComputeOperator::ComputedColumnSpec{
         "Dst", Schema::TEXT,
         [url_idx = std::optional<size_t>{}](
-            const ExecBatch& batch, size_t row_idx) mutable -> VarType {
+            const ExecBatch& batch, size_t row_idx) mutable -> scalar::Value {
             if (!url_idx.has_value()) {
                 url_idx = batch.schema->ColumnIndex("URL");
             }

@@ -38,8 +38,7 @@ std::optional<ExecBatch> FilterOperator::Next() {
                 ctp::AppendColumnValue(
                     filtered_batch[col_idx],
                     batch.columns[col_idx],
-                    row_idx,
-                    schema.ColumnType(col_idx));
+                    row_idx);
             }
             row_count++;
         }

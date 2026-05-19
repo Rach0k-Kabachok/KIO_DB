@@ -6,11 +6,10 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <unordered_set>
-#include <variant>
 #include <vector>
 
 #include "global/columnar_types.h"
+#include "global/scalar_value.h"
 #include "global/schema.h"
 #include "transport/kio/kio_db_reader.h"
 
@@ -20,17 +19,6 @@ struct ExecBatch {
     std::shared_ptr<const Schema> schema;
     size_t row_count = 0;
 };
-
-using VarType = std::variant<
-    int64_t,
-    int32_t,
-    int16_t,
-    double,
-    std::string,
-    char,
-    unsigned char>;
-
-using VarVector = std::vector<VarType>;
 
 class IOperator {
 public:
@@ -42,12 +30,12 @@ public:
 struct MinMaxConstraint {
     std::string column_name;
     Schema::Types type = Schema::BIGINT;
-    std::optional<VarType> lower;
-    std::optional<VarType> upper;
+    std::optional<scalar::Value> lower;
+    std::optional<scalar::Value> upper;
     bool lower_inclusive = true;
     bool upper_inclusive = true;
     bool not_equal = false;
-    VarType not_equal_value = int64_t{0};
+    scalar::Value not_equal_value = int64_t{0};
 };
 
 class TableScanOperator: public IOperator {
@@ -69,8 +57,8 @@ private:
 
 class ComputeOperator: public IOperator {
 public:
-    using RowComputer = std::function<VarType(const ExecBatch& batch,
-                                              size_t row_idx)>;
+    using RowComputer = std::function<scalar::Value(
+        const ExecBatch& batch, size_t row_idx)>;
 
     struct ComputedColumnSpec {
         std::string name;
@@ -122,15 +110,6 @@ private:
 
 class AggregateOperatorBase {
 public:
-    using DistinctSet = std::variant<
-        std::unordered_set<int64_t>,
-        std::unordered_set<int32_t>,
-        std::unordered_set<int16_t>,
-        std::unordered_set<double>,
-        std::unordered_set<std::string>,
-        std::unordered_set<char>,
-        std::unordered_set<unsigned char>>;
-    
     enum class AggregateKind {
         COUNT,
         SUM,
@@ -154,7 +133,7 @@ public:
         ctp::Column result;
         int64_t avg_count = 0;
         double avg_sum = 0.0;
-        DistinctSet distinct_values;
+        scalar::DistinctSet distinct_values;
     };
 protected:
     explicit AggregateOperatorBase(const std::vector<AggregateSpec>& aggregates);
@@ -239,12 +218,12 @@ protected:
 
     std::vector<SortColumn> MakeSortColumns(const Schema& schema) const;
 
-    static bool CompareRows(const VarVector& lhs, const VarVector& rhs,
+    static bool CompareRows(const scalar::Row& lhs, const scalar::Row& rhs,
                             const std::vector<SortColumn>& sort_columns);
-    static VarVector MakeRow(const ExecBatch& batch, size_t row_idx);
-    static std::vector<VarVector> MakeRows(const ExecBatch& batch);
+    static scalar::Row MakeRow(const ExecBatch& batch, size_t row_idx);
+    static std::vector<scalar::Row> MakeRows(const ExecBatch& batch);
     static ctp::ColumnarBatch MakeOutputColumns(
-        const std::vector<VarVector>& rows,
+        const std::vector<scalar::Row>& rows,
         const std::shared_ptr<const Schema>& schema);
 
     std::vector<SortKey> sort_keys_;
@@ -261,12 +240,12 @@ public:
     virtual std::optional<ExecBatch> Next() override;
     virtual ~SortOperator() = default;
 private:
-    std::vector<VarVector> MergeSortedBatchPair(
-        std::vector<VarVector>& lhs,
-        std::vector<VarVector>& rhs,
+    std::vector<scalar::Row> MergeSortedBatchPair(
+        std::vector<scalar::Row>& lhs,
+        std::vector<scalar::Row>& rhs,
         const std::vector<SortColumn>& sort_columns) const;
-    std::vector<VarVector> MergeSortedBatches(
-        std::vector<std::vector<VarVector>> sorted_batches,
+    std::vector<scalar::Row> MergeSortedBatches(
+        std::vector<std::vector<scalar::Row>> sorted_batches,
         const std::vector<SortColumn>& sort_columns) const;
 
     std::unique_ptr<IOperator> child_op_;

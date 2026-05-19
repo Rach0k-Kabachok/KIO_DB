@@ -2,11 +2,10 @@
 
 #include <cstddef>
 #include <memory>
-#include <type_traits>
-#include <variant>
 #include <vector>
 
 #include "global/column_operations.h"
+#include "global/scalar_value.h"
 
 SortOperatorBase::SortOperatorBase(const std::vector<SortKey>& sort_keys)
     : sort_keys_(sort_keys) {
@@ -26,23 +25,12 @@ std::vector<SortOperatorBase::SortColumn> SortOperatorBase::MakeSortColumns(
 }
 
 bool SortOperatorBase::CompareRows(
-    const VarVector& lhs,
-    const VarVector& rhs,
+    const scalar::Row& lhs,
+    const scalar::Row& rhs,
     const std::vector<SortColumn>& sort_columns) {
     for (const SortColumn& sort_column : sort_columns) {
-        const int compare_result = std::visit(
-            [&rhs, &sort_column](const auto& lhs_value) -> int {
-                using Value = std::decay_t<decltype(lhs_value)>;
-                const auto& rhs_value =
-                    std::get<Value>(rhs[sort_column.column_idx]);
-
-                if (lhs_value == rhs_value) {
-                    return 0;
-                }
-
-                return lhs_value < rhs_value ? -1 : 1;
-            },
-            lhs[sort_column.column_idx]);
+        const int compare_result = scalar::Compare(
+            lhs[sort_column.column_idx], rhs[sort_column.column_idx]);
 
         if (compare_result == 0) {
             continue;
@@ -57,23 +45,12 @@ bool SortOperatorBase::CompareRows(
     return false;
 }
 
-VarVector SortOperatorBase::MakeRow(const ExecBatch& batch, size_t row_idx) {
-    VarVector row;
-    row.reserve(batch.columns.size());
-
-    for (const ctp::Column& column : batch.columns) {
-        std::visit(
-            [&row, row_idx](const auto& values) {
-                row.push_back(values[row_idx]);
-            },
-            column);
-    }
-
-    return row;
+scalar::Row SortOperatorBase::MakeRow(const ExecBatch& batch, size_t row_idx) {
+    return scalar::MakeRow(batch.columns, row_idx);
 }
 
-std::vector<VarVector> SortOperatorBase::MakeRows(const ExecBatch& batch) {
-    std::vector<VarVector> rows;
+std::vector<scalar::Row> SortOperatorBase::MakeRows(const ExecBatch& batch) {
+    std::vector<scalar::Row> rows;
     rows.reserve(batch.row_count);
 
     for (size_t row_idx = 0; row_idx < batch.row_count; row_idx++) {
@@ -84,7 +61,7 @@ std::vector<VarVector> SortOperatorBase::MakeRows(const ExecBatch& batch) {
 }
 
 ctp::ColumnarBatch SortOperatorBase::MakeOutputColumns(
-    const std::vector<VarVector>& rows,
+    const std::vector<scalar::Row>& rows,
     const std::shared_ptr<const Schema>& schema) {
     ctp::ColumnarBatch output_columns;
     output_columns.reserve(schema->ColumnCount());
@@ -94,18 +71,11 @@ ctp::ColumnarBatch SortOperatorBase::MakeOutputColumns(
             ctp::MakeEmptyColumn(schema->ColumnType(col_idx), rows.size()));
     }
 
-    for (const VarVector& row : rows) {
+    for (const scalar::Row& row : rows) {
         for (size_t col_idx = 0; col_idx < output_columns.size(); col_idx++) {
-            std::visit(
-                [&row, col_idx](auto& values) {
-                    using Value =
-                        typename std::decay_t<decltype(values)>::value_type;
-                    values.push_back(std::get<Value>(row[col_idx]));
-                },
-                output_columns[col_idx]);
+            scalar::AppendValue(output_columns[col_idx], row[col_idx]);
         }
     }
 
     return output_columns;
 }
-

@@ -1,6 +1,7 @@
 #include "column_operations.h"
 
 #include <stdexcept>
+#include <type_traits>
 
 namespace ctp {
 
@@ -34,37 +35,11 @@ Column MakeEmptyColumn(Schema::Types type, size_t reserve_rows) {
     throw std::invalid_argument("Unsupported column type");
 }
 
-void AppendColumnValue(Column& dst, const Column& src, size_t row_idx,
-                       Schema::Types type) {
-    switch (type) {
-    case Schema::BIGINT:
-    case Schema::TIMESTAMP:
-        std::get<std::vector<int64_t>>(dst).push_back(
-            std::get<std::vector<int64_t>>(src)[row_idx]);
-        break;
-    case Schema::INTEGER:
-    case Schema::DATE:
-        std::get<std::vector<int32_t>>(dst).push_back(
-            std::get<std::vector<int32_t>>(src)[row_idx]);
-        break;
-    case Schema::SMALLINT:
-        std::get<std::vector<int16_t>>(dst).push_back(
-            std::get<std::vector<int16_t>>(src)[row_idx]);
-        break;
-    case Schema::TEXT:
-    case Schema::VARCHAR:
-        std::get<std::vector<std::string>>(dst).push_back(
-            std::get<std::vector<std::string>>(src)[row_idx]);
-        break;
-    case Schema::CHAR:
-        std::get<std::vector<char>>(dst).push_back(
-            std::get<std::vector<char>>(src)[row_idx]);
-        break;
-    case Schema::DOUBLE:
-        std::get<std::vector<double>>(dst).push_back(
-            std::get<std::vector<double>>(src)[row_idx]);
-        break;
-    }
+void AppendColumnValue(Column& dst, const Column& src, size_t row_idx) {
+    std::visit([&dst, row_idx](const auto& values) {
+        using Values = std::decay_t<decltype(values)>;
+        std::get<Values>(dst).push_back(values[row_idx]);
+    }, src);
 }
 
 }  // namespace ctp

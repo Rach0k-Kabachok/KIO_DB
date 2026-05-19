@@ -18,7 +18,7 @@ std::vector<char> EncodeTypedColumn(const std::vector<T>& values) {
     }
 
     int64_t previous = static_cast<int64_t>(values.front());
-    AppendPod(result, previous);
+    bcodec::AppendPod(result, previous);
 
     std::vector<uint64_t> deltas;
     deltas.reserve(values.size() - 1);
@@ -44,7 +44,7 @@ ctp::Column DecodeTypedColumn(const std::vector<char>& payload,
     }
 
     size_t offset = 0;
-    int64_t current = ReadPod<int64_t>(payload, offset);
+    int64_t current = bcodec::ReadPod<int64_t>(payload, offset);
     result.push_back(static_cast<T>(current));
 
     std::vector<uint64_t> deltas =

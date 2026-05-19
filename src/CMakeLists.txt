@@ -22,6 +22,7 @@ add_library(kio_core STATIC
         global/kio_db.cpp
         global/schema.cpp
         global/column_operations.cpp
+        global/scalar_value.cpp
 
         execution/table_scan_op.cpp
         execution/clickbench_queries.cpp

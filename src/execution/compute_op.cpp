@@ -8,18 +8,8 @@
 
 #include "global/column_operations.h"
 #include "global/columnar_types.h"
+#include "global/scalar_value.h"
 #include "global/schema.h"
-
-namespace {
-
-void AppendComputedValue(ctp::Column& column, const VarType& value) {
-    std::visit([&column](const auto& scalar) {
-        using Value = std::decay_t<decltype(scalar)>;
-        std::get<std::vector<Value>>(column).push_back(scalar);
-    }, value);
-}
-
-}  // namespace
 
 ComputeOperator::ComputeOperator(
         std::unique_ptr<IOperator> child_op,
@@ -59,7 +49,7 @@ std::optional<ExecBatch> ComputeOperator::Next() {
     for (const ComputedColumnSpec& spec : computed_columns_) {
         ctp::Column column = ctp::MakeEmptyColumn(spec.type, batch.row_count);
         for (size_t row_idx = 0; row_idx < batch.row_count; row_idx++) {
-            AppendComputedValue(column, spec.compute(batch, row_idx));
+            scalar::AppendValue(column, spec.compute(batch, row_idx));
         }
         batch.columns.push_back(std::move(column));
     }

@@ -29,11 +29,11 @@ std::optional<ExecBatch> TopKOperator::Next() {
     const std::vector<SortColumn> sort_columns =
         MakeSortColumns(*output_schema);
 
-    const auto heap_compare = [&sort_columns](const VarVector& lhs,
-                                              const VarVector& rhs) {
+    const auto heap_compare = [&sort_columns](const scalar::Row& lhs,
+                                              const scalar::Row& rhs) {
         return SortOperatorBase::CompareRows(lhs, rhs, sort_columns);
     };
-    std::priority_queue<VarVector, std::vector<VarVector>,
+    std::priority_queue<scalar::Row, std::vector<scalar::Row>,
                         decltype(heap_compare)>
         top_k(heap_compare);
 
@@ -41,7 +41,7 @@ std::optional<ExecBatch> TopKOperator::Next() {
         ExecBatch& batch = optional_batch.value();
 
         for (size_t row_idx = 0; row_idx < batch.row_count; row_idx++) {
-            VarVector row = SortOperatorBase::MakeRow(batch, row_idx);
+            scalar::Row row = SortOperatorBase::MakeRow(batch, row_idx);
 
             if (top_k.size() < limit_) {
                 top_k.push(std::move(row));
@@ -53,7 +53,7 @@ std::optional<ExecBatch> TopKOperator::Next() {
         }
     } while ((optional_batch = child_op_->Next()).has_value());
 
-    std::vector<VarVector> rows;
+    std::vector<scalar::Row> rows;
     rows.reserve(top_k.size());
     while (!top_k.empty()) {
         rows.push_back(top_k.top());
@@ -61,7 +61,8 @@ std::optional<ExecBatch> TopKOperator::Next() {
     }
 
     std::sort(rows.begin(), rows.end(),
-              [&sort_columns](const VarVector& lhs, const VarVector& rhs) {
+              [&sort_columns](const scalar::Row& lhs,
+                              const scalar::Row& rhs) {
                   return SortOperatorBase::CompareRows(lhs, rhs, sort_columns);
               });
 

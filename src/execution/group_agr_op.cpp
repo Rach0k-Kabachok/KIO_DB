@@ -1,67 +1,29 @@
 #include "operators.h"
 
 #include <cstddef>
-#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include "global/column_operations.h"
 #include "global/columnar_types.h"
+#include "global/scalar_value.h"
 #include "global/schema.h"
 
 namespace {
 
-size_t HashCombine(size_t seed, size_t value) {
-    return seed ^ (value + 0x9e3779b9 + (seed << 6) + (seed >> 2));
-}
-
-struct VarTypeHash {
-    size_t operator()(const VarType& value) const {
-        return std::visit([](const auto& scalar) {
-            using Value = std::decay_t<decltype(scalar)>;
-            return std::hash<Value>()(scalar);
-        }, value);
-    }
-};
-
-struct VarVectorHash {
-    size_t operator()(const VarVector& key) const {
-        size_t result = 0;
-        VarTypeHash value_hash;
-        for (const VarType& value : key) {
-            result = HashCombine(result, value_hash(value));
-        }
-        return result;
-    }
-};
-
-VarType GetVarType(const ctp::Column& column, size_t row_idx) {
-    return std::visit([row_idx](const auto& values) -> VarType {
-        return values[row_idx];
-    }, column);
-}
-
-VarVector MakeVarVector(const ExecBatch& batch,
-                      const std::vector<size_t>& group_indices,
-                      size_t row_idx) {
-    VarVector key;
+scalar::Row MakeGroupKey(const ExecBatch& batch,
+                         const std::vector<size_t>& group_indices,
+                         size_t row_idx) {
+    scalar::Row key;
     key.reserve(group_indices.size());
     for (size_t column_idx : group_indices) {
-        key.push_back(GetVarType(batch.columns[column_idx], row_idx));
+        key.push_back(scalar::GetValue(batch.columns[column_idx], row_idx));
     }
     return key;
-}
-
-void AppendVarType(ctp::Column& column, const VarType& value) {
-    std::visit([&column](const auto& scalar) {
-        using Value = std::decay_t<decltype(scalar)>;
-        std::get<std::vector<Value>>(column).push_back(scalar);
-    }, value);
 }
 
 }  // namespace
@@ -114,14 +76,16 @@ std::optional<ExecBatch> GroupAgrOperator::Next() {
     std::shared_ptr<const Schema> output_schema = std::make_shared<Schema>(
         Schema::FromColumns(output_names, output_types));
 
-    std::unordered_map<VarVector, std::vector<AggregateState>, VarVectorHash>
+    std::unordered_map<scalar::Row, std::vector<AggregateState>,
+                       scalar::RowHash>
         groups;
 
     while (optional_batch.has_value()) {
         ExecBatch& exec_batch = optional_batch.value();
 
         for (size_t row_idx = 0; row_idx < exec_batch.row_count; row_idx++) {
-            VarVector key = MakeVarVector(exec_batch, group_indices, row_idx);
+            scalar::Row key =
+                MakeGroupKey(exec_batch, group_indices, row_idx);
             auto [it, inserted] = groups.try_emplace(
                 std::move(key), initial_states);
 
@@ -143,7 +107,7 @@ std::optional<ExecBatch> GroupAgrOperator::Next() {
 
     for (auto& [key, aggregate_states] : groups) {
         for (size_t idx = 0; idx < key.size(); idx++) {
-            AppendVarType(output_columns[idx], key[idx]);
+            scalar::AppendValue(output_columns[idx], key[idx]);
         }
 
         ctp::ColumnarBatch aggregate_results =
@@ -152,8 +116,7 @@ std::optional<ExecBatch> GroupAgrOperator::Next() {
             ctp::AppendColumnValue(
                 output_columns[group_columns_.size() + idx],
                 aggregate_results[idx],
-                0,
-                aggregate_types[idx]);
+                0);
         }
     }
 

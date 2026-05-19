@@ -1,6 +1,5 @@
 #pragma once
 
-#include <string>
 #include <vector>
 #include <variant>
 
@@ -20,15 +19,8 @@ const std::vector<T>& GetColumnData(const Column& column) {
     return std::get<std::vector<T>>(column);
 }
 
-// Специализация для строк
-template<>
-inline const std::vector<std::string>& GetColumnData<std::string>(const Column& column) {
-    return std::get<std::vector<std::string>>(column);
-}
-
 Column MakeEmptyColumn(Schema::Types type, size_t reserve_rows = 0);
 
-void AppendColumnValue(Column& dst, const Column& src, size_t row_idx,
-                       Schema::Types type);
+void AppendColumnValue(Column& dst, const Column& src, size_t row_idx);
 
 }  // namespace ctp

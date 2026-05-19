@@ -101,7 +101,7 @@ TEST(ComputeOperatorTest, AppendsComputedColumns) {
             std::vector<ExecBatch>{std::move(input)}),
         std::vector<ComputeOperator::ComputedColumnSpec>{
             {"twice", Schema::BIGINT,
-             [](const ExecBatch& batch, size_t row_idx) -> VarType {
+             [](const ExecBatch& batch, size_t row_idx) -> scalar::Value {
                  const size_t idx = batch.schema->ColumnIndex("value");
                  return std::get<std::vector<int64_t>>(batch.columns[idx])
                             [row_idx] *

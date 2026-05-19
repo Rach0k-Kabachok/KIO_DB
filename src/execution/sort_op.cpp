@@ -19,7 +19,7 @@ std::optional<ExecBatch> SortOperator::Next() {
 
     std::shared_ptr<const Schema> output_schema;
     std::vector<SortColumn> sort_columns;
-    std::vector<std::vector<VarVector>> sorted_batches;
+    std::vector<std::vector<scalar::Row>> sorted_batches;
 
     std::optional<ExecBatch> optional_batch = child_op_->Next();
     while (optional_batch.has_value()) {
@@ -30,11 +30,12 @@ std::optional<ExecBatch> SortOperator::Next() {
             sort_columns = MakeSortColumns(*output_schema);
         }
 
-        std::vector<VarVector> rows = MakeRows(batch);
+        std::vector<scalar::Row> rows = MakeRows(batch);
         if (!rows.empty()) {
             std::sort(
                 rows.begin(), rows.end(),
-                [&sort_columns](const VarVector& lhs, const VarVector& rhs) {
+                [&sort_columns](const scalar::Row& lhs,
+                                const scalar::Row& rhs) {
                     return SortOperatorBase::CompareRows(lhs, rhs,
                                                          sort_columns);
                 });
@@ -48,17 +49,17 @@ std::optional<ExecBatch> SortOperator::Next() {
         return std::nullopt;
     }
 
-    std::vector<VarVector> rows =
+    std::vector<scalar::Row> rows =
         MergeSortedBatches(std::move(sorted_batches), sort_columns);
     return ExecBatch{MakeOutputColumns(rows, output_schema), std::move(output_schema),
                      rows.size()};
 }
 
-std::vector<VarVector> SortOperator::MergeSortedBatchPair(
-    std::vector<VarVector>& lhs,
-    std::vector<VarVector>& rhs,
+std::vector<scalar::Row> SortOperator::MergeSortedBatchPair(
+    std::vector<scalar::Row>& lhs,
+    std::vector<scalar::Row>& rhs,
     const std::vector<SortColumn>& sort_columns) const {
-    std::vector<VarVector> merged;
+    std::vector<scalar::Row> merged;
     merged.reserve(lhs.size() + rhs.size());
 
     size_t lhs_idx = 0;
@@ -87,15 +88,15 @@ std::vector<VarVector> SortOperator::MergeSortedBatchPair(
     return merged;
 }
 
-std::vector<VarVector> SortOperator::MergeSortedBatches(
-    std::vector<std::vector<VarVector>> sorted_batches,
+std::vector<scalar::Row> SortOperator::MergeSortedBatches(
+    std::vector<std::vector<scalar::Row>> sorted_batches,
     const std::vector<SortColumn>& sort_columns) const {
     if (sorted_batches.empty()) {
         return {};
     }
 
     while (sorted_batches.size() > 1) {
-        std::vector<std::vector<VarVector>> merged_batches;
+        std::vector<std::vector<scalar::Row>> merged_batches;
         merged_batches.reserve((sorted_batches.size() + 1) / 2);
 
         for (size_t idx = 0; idx < sorted_batches.size(); idx += 2) {
