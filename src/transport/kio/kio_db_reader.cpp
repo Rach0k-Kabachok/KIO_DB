@@ -41,7 +41,7 @@ const kio::RowGroupMeta& KioDbReader::GetRowGroupMeta() const {
     return metadata_.row_groups[next_row_group_ - 1];
 }
 
-const kio::RowGroupMeta* KioDbReader::PeekNextRowGroup() const {
+const kio::RowGroupMeta* KioDbReader::PeekNextRowGroupMeta() const {
     if (next_row_group_ >= metadata_.row_groups.size()) {
         return nullptr;
     }

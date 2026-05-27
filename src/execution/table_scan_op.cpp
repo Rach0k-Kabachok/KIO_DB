@@ -69,15 +69,20 @@ bool ConstraintMayMatch(const kio::ColumnChunkInfo& chunk,
 }
 
 bool RowGroupMayMatch(
-        const Schema& schema,
-        const kio::RowGroupMeta& row_group,
-        const std::vector<MinMaxConstraint>& constraints) {
-    for (const MinMaxConstraint& constraint : constraints) {
+    const Schema& schema,
+    const kio::RowGroupMeta& row_group,
+    const std::shared_ptr<std::vector<MinMaxConstraint>>& constraints) {
+    if (!constraints || constraints->empty()) {
+        return true;
+    }
+
+    for (const MinMaxConstraint& constraint : *constraints) {
         const size_t column_idx = schema.ColumnIndex(constraint.column_name);
         if (!ConstraintMayMatch(row_group.columns[column_idx], constraint)) {
             return false;
         }
     }
+
     return true;
 }
 
@@ -108,29 +113,22 @@ TableScanOperator::TableScanOperator(
 
 
 std::optional<ExecBatch> TableScanOperator::Next() {
-    if (constraints_) {
-        const kio::RowGroupMeta* row_group = reader_.PeekNextRowGroup();
-        while (row_group != nullptr) {
-            if (RowGroupMayMatch(reader_.GetSchema(),
-                                 *row_group, *constraints_)) {
-                break;
-            }
-            reader_.SkipNextBatch();
-            row_group = reader_.PeekNextRowGroup();
+    const kio::RowGroupMeta* row_group;
+    while ((row_group = reader_.PeekNextRowGroupMeta())) {
+        if (RowGroupMayMatch(reader_.GetSchema(),
+                            *row_group, constraints_)) {
+            break;
         }
+        reader_.SkipNextBatch();
+        row_group = reader_.PeekNextRowGroupMeta();
     }
 
-    const kio::RowGroupMeta* row_group = reader_.PeekNextRowGroup();
     if (row_group == nullptr) {
         return std::nullopt;
     }
     const size_t row_count = row_group->batch.row_num;
 
-    std::optional<ctp::ColumnarBatch> columns =
-        reader_.ReadNextBatch(column_indices_);
-    if (!columns.has_value()) {
-        return std::nullopt;
-    }
+    ctp::ColumnarBatch columns = reader_.ReadNextBatch(column_indices_).value();
 
-    return ExecBatch{std::move(*columns), output_schema_, row_count};
+    return ExecBatch{std::move(columns), output_schema_, row_count};
 }

@@ -135,6 +135,42 @@ TEST(GroupAgrOperatorTest, GroupsByOneColumnAcrossBatches) {
     EXPECT_FALSE(op.Next().has_value());
 }
 
+TEST(GroupAgrOperatorTest, GroupsByOneNumericColumnAcrossBatches) {
+    auto schema = MakeAggregateTestSchema();
+    std::vector<ExecBatch> batches;
+    batches.push_back(MakeAggregateTestBatch(
+        schema, {"a", "b", "a"}, {1, 2, 1}, {1, 2, 3},
+        {"x", "y", "x"}));
+    batches.push_back(MakeAggregateTestBatch(
+        schema, {"b", "c"}, {2, 3}, {4, 5}, {"z", "q"}));
+
+    GroupAgrOperator op(
+        std::make_unique<VectorOperator>(std::move(batches)),
+        std::vector<std::string>{"sub"},
+        std::vector<AggregateSpec>{
+            {AggregateKind::COUNT, "", "cnt"},
+            {AggregateKind::SUM, "value", "sum"}});
+
+    std::optional<ExecBatch> batch = op.Next();
+    ASSERT_TRUE(batch.has_value());
+    EXPECT_EQ(batch->row_count, 3u);
+
+    const auto& groups = std::get<std::vector<int64_t>>(batch->columns[0]);
+    const auto& counts = std::get<std::vector<int64_t>>(batch->columns[1]);
+    const auto& sums = std::get<std::vector<int64_t>>(batch->columns[2]);
+
+    std::map<int64_t, std::pair<int64_t, int64_t>> result;
+    for (size_t idx = 0; idx < batch->row_count; idx++) {
+        result[groups[idx]] = {counts[idx], sums[idx]};
+    }
+
+    using IntPair = std::pair<int64_t, int64_t>;
+    EXPECT_EQ(result[1], IntPair(2, 4));
+    EXPECT_EQ(result[2], IntPair(2, 6));
+    EXPECT_EQ(result[3], IntPair(1, 5));
+    EXPECT_FALSE(op.Next().has_value());
+}
+
 TEST(GroupAgrOperatorTest, GroupsByTwoColumnsAndCountsDistinct) {
     auto schema = MakeAggregateTestSchema();
     std::vector<ExecBatch> batches;

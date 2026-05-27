@@ -3,6 +3,7 @@
 #include <memory>
 #include <optional>
 #include <utility>
+#include <vector>
 
 #include "global/column_operations.h"
 #include "global/columnar_types.h"
@@ -14,35 +15,27 @@ FilterOperator::FilterOperator(std::unique_ptr<IOperator> child_op,
 }
 
 std::optional<ExecBatch> FilterOperator::Next() {
-    std::optional<ExecBatch> exec_batch = child_op_->Next();
+    std::optional<ExecBatch> optional_batch = child_op_->Next();
     
-    if (!exec_batch.has_value()) {
+    if (!optional_batch.has_value()) {
         return std::nullopt;
     }
 
-    ExecBatch& batch = exec_batch.value();
-    const Schema& schema = *batch.schema;
-    ctp::ColumnarBatch filtered_batch;
-    filtered_batch.reserve(batch.columns.size());
-
-    for (size_t col_idx = 0; col_idx < batch.columns.size(); col_idx++) {
-        filtered_batch.push_back(
-            ctp::MakeEmptyColumn(schema.ColumnType(col_idx), batch.row_count));
-    }
-
-    size_t row_count = 0;
-    for (size_t row_idx = 0; row_idx < batch.row_count; row_idx++) {
-        if (predicate_(batch, row_idx)) {
-            for (size_t col_idx = 0; col_idx < filtered_batch.size();
-                 col_idx++) {
-                ctp::AppendColumnValue(
-                    filtered_batch[col_idx],
-                    batch.columns[col_idx],
-                    row_idx);
-            }
-            row_count++;
+    ExecBatch& exec_batch = optional_batch.value();
+    std::vector<size_t> selected_rows;
+    selected_rows.reserve(exec_batch.row_count);
+    for (size_t row_idx = 0; row_idx < exec_batch.row_count; row_idx++) {
+        if (predicate_(exec_batch, row_idx)) {
+            selected_rows.push_back(row_idx);
         }
     }
 
-    return ExecBatch{std::move(filtered_batch), batch.schema, row_count};
+    ctp::ColumnarBatch filtered_batch;
+    filtered_batch.reserve(exec_batch.columns.size());
+    for (const ctp::Column& column : exec_batch.columns) {
+        filtered_batch.push_back(ctp::GatherColumnRows(column, selected_rows));
+    }
+
+    return ExecBatch{std::move(filtered_batch), exec_batch.schema,
+                     selected_rows.size()};
 }

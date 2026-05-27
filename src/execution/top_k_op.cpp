@@ -1,11 +1,14 @@
 #include "execution/operators.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <queue>
 #include <utility>
 #include <vector>
+
+#include "global/column_operations.h"
 
 TopKOperator::TopKOperator(std::unique_ptr<IOperator> child_op,
                            const std::vector<SortKey>& sort_keys, size_t limit)
@@ -29,11 +32,13 @@ std::optional<ExecBatch> TopKOperator::Next() {
     const std::vector<SortColumn> sort_columns =
         MakeSortColumns(*output_schema);
 
-    const auto heap_compare = [&sort_columns](const scalar::Row& lhs,
-                                              const scalar::Row& rhs) {
-        return SortOperatorBase::CompareRows(lhs, rhs, sort_columns);
+    const auto heap_compare = [&sort_columns](const ctp::ColumnarBatch& lhs,
+                                              const ctp::ColumnarBatch& rhs) {
+        return SortOperatorBase::RowComesBefore(lhs, 0,
+                                                rhs, 0,
+                                                sort_columns);
     };
-    std::priority_queue<scalar::Row, std::vector<scalar::Row>,
+    std::priority_queue<ctp::ColumnarBatch, std::vector<ctp::ColumnarBatch>,
                         decltype(heap_compare)>
         top_k(heap_compare);
 
@@ -41,19 +46,20 @@ std::optional<ExecBatch> TopKOperator::Next() {
         ExecBatch& batch = optional_batch.value();
 
         for (size_t row_idx = 0; row_idx < batch.row_count; row_idx++) {
-            scalar::Row row = SortOperatorBase::MakeRow(batch, row_idx);
-
             if (top_k.size() < limit_) {
-                top_k.push(std::move(row));
-            } else if (SortOperatorBase::CompareRows(row, top_k.top(),
-                                                     sort_columns)) {
+                top_k.push(
+                    SortOperatorBase::MakeOutputColumnsByRowIds(batch, {row_idx}));
+            } else if (SortOperatorBase::RowComesBefore(
+                           batch.columns, row_idx,
+                           top_k.top(), 0, sort_columns)) {
                 top_k.pop();
-                top_k.push(std::move(row));
+                top_k.push(
+                    SortOperatorBase::MakeOutputColumnsByRowIds(batch, {row_idx}));
             }
         }
     } while ((optional_batch = child_op_->Next()).has_value());
 
-    std::vector<scalar::Row> rows;
+    std::vector<ctp::ColumnarBatch> rows;
     rows.reserve(top_k.size());
     while (!top_k.empty()) {
         rows.push_back(top_k.top());
@@ -61,11 +67,19 @@ std::optional<ExecBatch> TopKOperator::Next() {
     }
 
     std::sort(rows.begin(), rows.end(),
-              [&sort_columns](const scalar::Row& lhs,
-                              const scalar::Row& rhs) {
-                  return SortOperatorBase::CompareRows(lhs, rhs, sort_columns);
+              [&sort_columns](const ctp::ColumnarBatch& lhs, const ctp::ColumnarBatch& rhs) {
+                  return SortOperatorBase::RowComesBefore(
+                      lhs, 0, rhs, 0, sort_columns);
               });
 
-    return ExecBatch{MakeOutputColumns(rows, output_schema), std::move(output_schema),
+    ctp::ColumnarBatch output_columns = ctp::MakeEmptyColumns(*output_schema);
+    for (const ctp::ColumnarBatch& row : rows) {
+        for (size_t col_idx = 0; col_idx < output_columns.size(); col_idx++) {
+            ctp::AppendColumnValue(output_columns[col_idx],
+                                   row[col_idx], 0);
+        }
+    }
+
+    return ExecBatch{std::move(output_columns), std::move(output_schema),
                      rows.size()};
 }

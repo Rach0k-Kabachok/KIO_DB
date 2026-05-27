@@ -16,7 +16,7 @@ public:
     const Schema& GetSchema() const;
     const kio::FileMetadata& GetMetadata() const;
     const kio::RowGroupMeta& GetRowGroupMeta() const;
-    const kio::RowGroupMeta* PeekNextRowGroup() const;
+    const kio::RowGroupMeta* PeekNextRowGroupMeta() const;
 
     std::optional<ctp::ColumnarBatch> ReadNextBatch();
 

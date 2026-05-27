@@ -116,6 +116,29 @@ TEST(FilterOperatorTest, KeepsInputSchemaPointer) {
               std::vector<int64_t>({20, 30}));
 }
 
+TEST(FilterOperatorTest, ReturnsEmptyColumnsWhenNothingMatches) {
+    auto schema = std::make_shared<Schema>(
+        std::vector<std::vector<std::string>>{{"name", "string"},
+                                              {"value", "int64"}});
+
+    std::vector<ExecBatch> batches;
+    batches.push_back(MakeTwoColumnBatch(
+        schema, {"a", "b", "c"}, {10, 20, 30}));
+
+    FilterOperator op(
+        std::make_unique<VectorOperator>(std::move(batches)),
+        [](const ExecBatch&, size_t) {
+            return false;
+        });
+
+    std::optional<ExecBatch> batch = op.Next();
+    ASSERT_TRUE(batch.has_value());
+    EXPECT_EQ(batch->schema, schema);
+    EXPECT_EQ(batch->row_count, 0u);
+    EXPECT_TRUE(std::get<std::vector<std::string>>(batch->columns[0]).empty());
+    EXPECT_TRUE(std::get<std::vector<int64_t>>(batch->columns[1]).empty());
+}
+
 TEST(ProjectOperatorTest, ReusesProjectedSchema) {
     auto input_schema = std::make_shared<Schema>(
         std::vector<std::vector<std::string>>{{"name", "string"},

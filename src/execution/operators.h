@@ -218,13 +218,12 @@ protected:
 
     std::vector<SortColumn> MakeSortColumns(const Schema& schema) const;
 
-    static bool CompareRows(const scalar::Row& lhs, const scalar::Row& rhs,
-                            const std::vector<SortColumn>& sort_columns);
-    static scalar::Row MakeRow(const ExecBatch& batch, size_t row_idx);
-    static std::vector<scalar::Row> MakeRows(const ExecBatch& batch);
-    static ctp::ColumnarBatch MakeOutputColumns(
-        const std::vector<scalar::Row>& rows,
-        const std::shared_ptr<const Schema>& schema);
+    static bool RowComesBefore(
+        const ctp::ColumnarBatch& lhs_columns, size_t lhs_row,
+        const ctp::ColumnarBatch& rhs_columns, size_t rhs_row,
+        const std::vector<SortColumn>& sort_columns);
+    static ctp::ColumnarBatch MakeOutputColumnsByRowIds(
+        const ExecBatch& batch, const std::vector<size_t>& row_ids);
 
     std::vector<SortKey> sort_keys_;
 };
@@ -240,14 +239,6 @@ public:
     virtual std::optional<ExecBatch> Next() override;
     virtual ~SortOperator() = default;
 private:
-    std::vector<scalar::Row> MergeSortedBatchPair(
-        std::vector<scalar::Row>& lhs,
-        std::vector<scalar::Row>& rhs,
-        const std::vector<SortColumn>& sort_columns) const;
-    std::vector<scalar::Row> MergeSortedBatches(
-        std::vector<std::vector<scalar::Row>> sorted_batches,
-        const std::vector<SortColumn>& sort_columns) const;
-
     std::unique_ptr<IOperator> child_op_;
     bool done_ = false;
 };

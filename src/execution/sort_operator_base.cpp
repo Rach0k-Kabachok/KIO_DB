@@ -1,7 +1,6 @@
 #include "execution/operators.h"
 
 #include <cstddef>
-#include <memory>
 #include <vector>
 
 #include "global/column_operations.h"
@@ -24,13 +23,19 @@ std::vector<SortOperatorBase::SortColumn> SortOperatorBase::MakeSortColumns(
     return sort_columns;
 }
 
-bool SortOperatorBase::CompareRows(
-    const scalar::Row& lhs,
-    const scalar::Row& rhs,
+bool SortOperatorBase::RowComesBefore(
+    const ctp::ColumnarBatch& lhs_columns,
+    size_t lhs_row,
+    const ctp::ColumnarBatch& rhs_columns,
+    size_t rhs_row,
     const std::vector<SortColumn>& sort_columns) {
     for (const SortColumn& sort_column : sort_columns) {
+        const ctp::Column& lhs_column = lhs_columns[sort_column.column_idx];
+        const ctp::Column& rhs_column = rhs_columns[sort_column.column_idx];
+
         const int compare_result = scalar::Compare(
-            lhs[sort_column.column_idx], rhs[sort_column.column_idx]);
+            scalar::GetValue(lhs_column, lhs_row),
+            scalar::GetValue(rhs_column, rhs_row));
 
         if (compare_result == 0) {
             continue;
@@ -45,36 +50,13 @@ bool SortOperatorBase::CompareRows(
     return false;
 }
 
-scalar::Row SortOperatorBase::MakeRow(const ExecBatch& batch, size_t row_idx) {
-    return scalar::MakeRow(batch.columns, row_idx);
-}
-
-std::vector<scalar::Row> SortOperatorBase::MakeRows(const ExecBatch& batch) {
-    std::vector<scalar::Row> rows;
-    rows.reserve(batch.row_count);
-
-    for (size_t row_idx = 0; row_idx < batch.row_count; row_idx++) {
-        rows.push_back(MakeRow(batch, row_idx));
-    }
-
-    return rows;
-}
-
-ctp::ColumnarBatch SortOperatorBase::MakeOutputColumns(
-    const std::vector<scalar::Row>& rows,
-    const std::shared_ptr<const Schema>& schema) {
+ctp::ColumnarBatch SortOperatorBase::MakeOutputColumnsByRowIds(
+    const ExecBatch& batch, const std::vector<size_t>& row_ids) {
     ctp::ColumnarBatch output_columns;
-    output_columns.reserve(schema->ColumnCount());
+    output_columns.reserve(batch.columns.size());
 
-    for (size_t col_idx = 0; col_idx < schema->ColumnCount(); col_idx++) {
-        output_columns.push_back(
-            ctp::MakeEmptyColumn(schema->ColumnType(col_idx), rows.size()));
-    }
-
-    for (const scalar::Row& row : rows) {
-        for (size_t col_idx = 0; col_idx < output_columns.size(); col_idx++) {
-            scalar::AppendValue(output_columns[col_idx], row[col_idx]);
-        }
+    for (const ctp::Column& column : batch.columns) {
+        output_columns.push_back(ctp::GatherColumnRows(column, row_ids));
     }
 
     return output_columns;

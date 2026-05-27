@@ -1,6 +1,7 @@
 #include "operators.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -24,6 +25,16 @@ scalar::Row MakeGroupKey(const ExecBatch& batch,
         key.push_back(scalar::GetValue(batch.columns[column_idx], row_idx));
     }
     return key;
+}
+
+ctp::ColumnarBatch MakeOutputColumns(
+    const std::vector<Schema::Types>& output_types, size_t reserve_rows) {
+    ctp::ColumnarBatch output_columns;
+    output_columns.reserve(output_types.size());
+    for (Schema::Types type : output_types) {
+        output_columns.push_back(ctp::MakeEmptyColumn(type, reserve_rows));
+    }
+    return output_columns;
 }
 
 }  // namespace
@@ -76,6 +87,74 @@ std::optional<ExecBatch> GroupAgrOperator::Next() {
     std::shared_ptr<const Schema> output_schema = std::make_shared<Schema>(
         Schema::FromColumns(output_names, output_types));
 
+    auto append_aggregate_results =
+        [this](ctp::ColumnarBatch& output_columns,
+               std::vector<AggregateState>& aggregate_states) {
+            ctp::ColumnarBatch aggregate_results =
+                FinalizeAggregation(aggregate_states);
+            for (size_t idx = 0; idx < aggregate_results.size(); idx++) {
+                ctp::AppendColumnValue(
+                    output_columns[group_columns_.size() + idx],
+                    aggregate_results[idx],
+                    0);
+            }
+        };
+
+    auto execute_single_key_groups = [&]<typename Key>() -> ExecBatch {
+        std::unordered_map<Key, std::vector<AggregateState>> groups;
+
+        while (optional_batch.has_value()) {
+            ExecBatch& exec_batch = optional_batch.value();
+            const auto& keys =
+                std::get<std::vector<Key>>(exec_batch.columns[group_indices[0]]);
+
+            for (size_t row_idx = 0; row_idx < exec_batch.row_count; row_idx++) {
+                auto [it, inserted] =
+                    groups.try_emplace(keys[row_idx], initial_states);
+
+                std::vector<AggregateState>& aggregate_states = it->second;
+                for (size_t idx = 0; idx < aggregates_.size(); idx++) {
+                    ApplyAggregateOperation(
+                        idx, aggregate_states[idx], exec_batch, row_idx);
+                }
+            }
+
+            optional_batch = child_op_->Next();
+        }
+
+        ctp::ColumnarBatch output_columns =
+            MakeOutputColumns(output_types, groups.size());
+        auto& output_keys = std::get<std::vector<Key>>(output_columns[0]);
+
+        for (auto& [key, aggregate_states] : groups) {
+            output_keys.push_back(key);
+            append_aggregate_results(output_columns, aggregate_states);
+        }
+
+        return ExecBatch{std::move(output_columns), output_schema,
+                         groups.size()};
+    };
+
+    if (group_indices.size() == 1) {
+        switch (group_types[0]) {
+        case Schema::BIGINT:
+        case Schema::TIMESTAMP:
+            return execute_single_key_groups.template operator()<int64_t>();
+        case Schema::INTEGER:
+        case Schema::DATE:
+            return execute_single_key_groups.template operator()<int32_t>();
+        case Schema::SMALLINT:
+            return execute_single_key_groups.template operator()<int16_t>();
+        case Schema::TEXT:
+        case Schema::VARCHAR:
+            return execute_single_key_groups.template operator()<std::string>();
+        case Schema::CHAR:
+            return execute_single_key_groups.template operator()<char>();
+        case Schema::DOUBLE:
+            return execute_single_key_groups.template operator()<double>();
+        }
+    }
+
     std::unordered_map<scalar::Row, std::vector<AggregateState>,
                        scalar::RowHash>
         groups;
@@ -99,25 +178,15 @@ std::optional<ExecBatch> GroupAgrOperator::Next() {
         optional_batch = child_op_->Next();
     }
 
-    ctp::ColumnarBatch output_columns;
-    output_columns.reserve(output_types.size());
-    for (Schema::Types type : output_types) {
-        output_columns.push_back(ctp::MakeEmptyColumn(type, groups.size()));
-    }
+    ctp::ColumnarBatch output_columns =
+        MakeOutputColumns(output_types, groups.size());
 
     for (auto& [key, aggregate_states] : groups) {
         for (size_t idx = 0; idx < key.size(); idx++) {
             scalar::AppendValue(output_columns[idx], key[idx]);
         }
 
-        ctp::ColumnarBatch aggregate_results =
-            FinalizeAggregation(aggregate_states);
-        for (size_t idx = 0; idx < aggregate_results.size(); idx++) {
-            ctp::AppendColumnValue(
-                output_columns[group_columns_.size() + idx],
-                aggregate_results[idx],
-                0);
-        }
+        append_aggregate_results(output_columns, aggregate_states);
     }
 
     return ExecBatch{std::move(output_columns), output_schema, groups.size()};

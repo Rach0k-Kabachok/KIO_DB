@@ -38,8 +38,8 @@ int ExportKioToCsv(const std::string& input_kiodb,
     return 0;
 }
 
-int ExecuteQuery(const std::string& input_kiodb,
-                 const std::string& query_id,
+int ExecuteQuery(const std::string& query_id,
+                 const std::string& input_kiodb,
                  const std::string& output_csv) {
     ResultWriterOperator writer(
         MakeClickBenchQuery(input_kiodb, std::stoi(query_id)), output_csv);
