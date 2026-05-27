@@ -1,5 +1,7 @@
 #include <exception>
 #include <iostream>
+#include <optional>
+#include <stdexcept>
 #include <string>
 
 #include "execution/clickbench_queries.h"
@@ -17,6 +19,21 @@ void PrintUsage(const char* program) {
               << " convert <input_csv> <schema_csv> <output_kiodb>\n"
               << "  " << program << " export <input_kiodb> <output_csv>\n"
               << "  " << program << " query <input_kiodb> <query_id> <output_csv>\n";
+}
+
+std::optional<int> ParseQueryId(const std::string& query_id) {
+    try {
+        size_t parsed_size = 0;
+        int result = std::stoi(query_id, &parsed_size);
+        if (parsed_size != query_id.size()) {
+            return std::nullopt;
+        }
+        return result;
+    } catch (const std::invalid_argument&) {
+        return std::nullopt;
+    } catch (const std::out_of_range&) {
+        return std::nullopt;
+    }
 }
 
 int ConvertCsvToKio(const std::string& input_csv,
@@ -38,17 +55,24 @@ int ExportKioToCsv(const std::string& input_kiodb,
     return 0;
 }
 
-int ExecuteQuery(const std::string& query_id,
-                 const std::string& input_kiodb,
+int ExecuteQuery(const std::string& input_kiodb,
+                 const std::string& query_id,
                  const std::string& output_csv) {
+    const std::optional<int> parsed_query_id = ParseQueryId(query_id);
+    if (!parsed_query_id.has_value()) {
+        std::cerr << "Invalid query id: " << query_id << "\n";
+        return 1;
+    }
+
     ResultWriterOperator writer(
-        MakeClickBenchQuery(input_kiodb, std::stoi(query_id)), output_csv);
+        MakeClickBenchQuery(input_kiodb, *parsed_query_id), output_csv);
     writer.Next();
     return 0;
 }
 }  // namespace
 
 int main(int argc, const char* argv[]) {
+    try {
         if (argc < 2) {
             PrintUsage(argv[0]);
             return 1;
@@ -81,4 +105,8 @@ int main(int argc, const char* argv[]) {
 
         PrintUsage(argv[0]);
         return 1;
+    } catch (const std::exception& error) {
+        std::cerr << error.what() << "\n";
+        return 1;
+    }
 }

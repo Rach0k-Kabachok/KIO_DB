@@ -27,6 +27,8 @@ add_library(kio_core STATIC
         global/scalar_value.cpp
 
         execution/table_scan_op.cpp
+        execution/predicates.cpp
+        execution/query_plan_helpers.cpp
         execution/clickbench_queries.cpp
         execution/compute_op.cpp
         execution/filter_op.cpp
