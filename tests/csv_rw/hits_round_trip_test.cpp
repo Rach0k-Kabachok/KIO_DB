@@ -26,13 +26,7 @@ std::filesystem::path HitsCsvPath() {
 }
 
 std::filesystem::path HitsSchemaPath() {
-    const std::filesystem::path underscore =
-        RepoRoot() / "Testing" / "hits_schema.csv";
-    if (std::filesystem::exists(underscore)) {
-        return underscore;
-    }
-
-    return RepoRoot() / "Testing" / "hits-schema.csv";
+    return RepoRoot() / "tests" / "hits_schema.csv";
 }
 
 std::filesystem::path TestOutputPath(const std::string& filename) {
@@ -157,14 +151,15 @@ void RoundTripCsvToKioAndBack(const std::filesystem::path& input_csv,
     }
 }
 
-void SkipIfHitsFilesAreMissing(const std::filesystem::path& hits_csv,
-                               const std::filesystem::path& hits_schema) {
+bool HitsFilesArePresent(const std::filesystem::path& hits_csv,
+                         const std::filesystem::path& hits_schema) {
     if (!std::filesystem::exists(hits_csv)) {
-        GTEST_SKIP() << "Missing " << hits_csv;
+        return false;
     }
     if (!std::filesystem::exists(hits_schema)) {
-        GTEST_SKIP() << "Missing " << hits_schema;
+        return false;
     }
+    return true;
 }
 
 }  // namespace
@@ -172,7 +167,9 @@ void SkipIfHitsFilesAreMissing(const std::filesystem::path& hits_csv,
 TEST(ReadWrite, HitsCsvSampleRoundTrip) {
     const std::filesystem::path hits_csv = HitsCsvPath();
     const std::filesystem::path hits_schema = HitsSchemaPath();
-    SkipIfHitsFilesAreMissing(hits_csv, hits_schema);
+    if (!HitsFilesArePresent(hits_csv, hits_schema)) {
+        GTEST_SKIP() << "Missing optional hits.csv sample or schema";
+    }
 
     const std::filesystem::path sample_csv =
         TestOutputPath("kio_db_hits_round_trip_sample.csv");
@@ -202,7 +199,9 @@ TEST(ReadWrite, HitsCsvSampleRoundTrip) {
 TEST(ReadWrite, HitsCsvFullRoundTrip) {
     const std::filesystem::path hits_csv = HitsCsvPath();
     const std::filesystem::path hits_schema = HitsSchemaPath();
-    SkipIfHitsFilesAreMissing(hits_csv, hits_schema);
+    if (!HitsFilesArePresent(hits_csv, hits_schema)) {
+        GTEST_SKIP() << "Missing optional hits.csv sample or schema";
+    }
 
     if (!EnvEnabled("KIO_DB_RUN_HITS_ROUND_TRIP")) {
         GTEST_SKIP()

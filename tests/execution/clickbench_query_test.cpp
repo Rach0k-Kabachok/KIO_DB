@@ -15,28 +15,15 @@
 #include "global/column_operations.h"
 #include "global/columnar_types.h"
 #include "global/schema.h"
+#include "operator_test_utils.h"
 #include "transport/kio/kio_db_importer.h"
 #include "transport/kio/kio_db_writer.h"
 
 namespace {
 
-class VectorOperator final : public IOperator {
-public:
-    explicit VectorOperator(std::vector<ExecBatch> batches)
-        : batches_(std::move(batches)) {
-    }
-
-    std::optional<ExecBatch> Next() override {
-        if (next_ >= batches_.size()) {
-            return std::nullopt;
-        }
-        return std::move(batches_[next_++]);
-    }
-
-private:
-    std::vector<ExecBatch> batches_;
-    size_t next_ = 0;
-};
+using test_exec::MakeBatch;
+using test_exec::MakeInput;
+using test_exec::Values;
 
 std::filesystem::path RepoRoot() {
     return std::filesystem::path(__FILE__).parent_path().parent_path()
@@ -88,71 +75,7 @@ void ExpectConsistentBatch(const ExecBatch& batch) {
 
 }  // namespace
 
-TEST(ComputeOperatorTest, AppendsComputedColumns) {
-    auto schema = std::make_shared<Schema>(
-        std::vector<std::vector<std::string>>{{"value", "int64"}});
-    ExecBatch input{
-        ctp::ColumnarBatch{ctp::Column{std::vector<int64_t>{1, 2, 3}}},
-        schema,
-        3};
-
-    ComputeOperator op(
-        std::make_unique<VectorOperator>(
-            std::vector<ExecBatch>{std::move(input)}),
-        std::vector<ComputeOperator::ComputedColumnSpec>{
-            {"twice", Schema::BIGINT,
-             [](const ExecBatch& batch, size_t row_idx) -> scalar::Value {
-                 const size_t idx = batch.schema->ColumnIndex("value");
-                 return std::get<std::vector<int64_t>>(batch.columns[idx])
-                            [row_idx] *
-                        2;
-             }}});
-
-    std::optional<ExecBatch> result = op.Next();
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->schema->ColumnName(1), "twice");
-    EXPECT_EQ(std::get<std::vector<int64_t>>(result->columns[1]),
-              std::vector<int64_t>({2, 4, 6}));
-    EXPECT_FALSE(op.Next().has_value());
-}
-
-TEST(ResultWriterTest, WritesExecBatchAsCsv) {
-    const std::filesystem::path output_path =
-        TestOutputPath("kio_db_exec_batch_result.csv");
-    std::error_code ec;
-    std::filesystem::remove(output_path, ec);
-
-    auto schema = std::make_shared<Schema>(
-        Schema::FromColumns({"id", "score", "name"},
-                            {Schema::BIGINT, Schema::DOUBLE, Schema::TEXT}));
-    ExecBatch batch{
-        ctp::ColumnarBatch{
-            ctp::Column{std::vector<int64_t>{1}},
-            ctp::Column{std::vector<double>{2.5}},
-            ctp::Column{std::vector<std::string>{"a,b"}}},
-        schema,
-        1};
-
-    {
-        ResultWriterOperator op(
-            std::make_unique<VectorOperator>(
-                std::vector<ExecBatch>{std::move(batch)}),
-            output_path.string());
-
-        EXPECT_FALSE(op.Next().has_value());
-        EXPECT_FALSE(op.Next().has_value());
-    }
-
-    std::ifstream input(output_path);
-    ASSERT_TRUE(input.is_open());
-    std::string line;
-    std::getline(input, line);
-    EXPECT_EQ(line, "1,2.5,\"a,b\"");
-
-    std::filesystem::remove(output_path, ec);
-}
-
-TEST(ResultWriterTest, SinkOperatorWritesAllChildBatches) {
+TEST(ResultWriterTest, WritesAllChildBatchesAsCsv) {
     const std::filesystem::path output_path =
         TestOutputPath("kio_db_result_writer_operator.csv");
     std::error_code ec;
@@ -161,23 +84,20 @@ TEST(ResultWriterTest, SinkOperatorWritesAllChildBatches) {
     auto schema = std::make_shared<Schema>(
         Schema::FromColumns({"id", "name"},
                             {Schema::BIGINT, Schema::TEXT}));
-    ExecBatch first{
+    ExecBatch first = MakeBatch(
+        schema,
         ctp::ColumnarBatch{
             ctp::Column{std::vector<int64_t>{1, 2}},
-            ctp::Column{std::vector<std::string>{"alpha", "b,b"}}},
+            ctp::Column{std::vector<std::string>{"alpha", "b,b"}}});
+    ExecBatch second = MakeBatch(
         schema,
-        2};
-    ExecBatch second{
         ctp::ColumnarBatch{
             ctp::Column{std::vector<int64_t>{3}},
-            ctp::Column{std::vector<std::string>{"quote\"me"}}},
-        schema,
-        1};
+            ctp::Column{std::vector<std::string>{"quote\"me"}}});
 
     {
         ResultWriterOperator op(
-            std::make_unique<VectorOperator>(
-                std::vector<ExecBatch>{std::move(first), std::move(second)}),
+            MakeInput({std::move(first), std::move(second)}),
             output_path.string());
 
         EXPECT_FALSE(op.Next().has_value());
@@ -223,8 +143,7 @@ TEST(TableScanOperatorTest, UsesMinMaxConstraintsToSkipRowGroups) {
     TableScanOperator scan(db_path.string(), {"value"}, constraints);
     std::optional<ExecBatch> result = scan.Next();
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(std::get<std::vector<int64_t>>(result->columns[0]),
-              std::vector<int64_t>({10, 11}));
+    EXPECT_EQ(Values<int64_t>(*result, 0), std::vector<int64_t>({10, 11}));
     EXPECT_FALSE(scan.Next().has_value());
 
     std::filesystem::remove(db_path, ec);
@@ -233,10 +152,12 @@ TEST(TableScanOperatorTest, UsesMinMaxConstraintsToSkipRowGroups) {
 TEST(ClickBenchQueryTest, ExecutesAllQueryIdsOnHitsSample) {
     const std::filesystem::path hits_csv = RepoRoot() / "Testing" / "hits.csv";
     const std::filesystem::path hits_schema =
-        RepoRoot() / "Testing" / "hits_schema.csv";
-    if (!std::filesystem::exists(hits_csv) ||
-        !std::filesystem::exists(hits_schema)) {
-        GTEST_SKIP() << "Missing ClickBench sample files";
+        RepoRoot() / "tests" / "hits_schema.csv";
+    if (!std::filesystem::exists(hits_csv)) {
+        GTEST_SKIP() << "Missing optional ClickBench sample: " << hits_csv;
+    }
+    if (!std::filesystem::exists(hits_schema)) {
+        GTEST_SKIP() << "Missing tracked ClickBench schema: " << hits_schema;
     }
 
     const std::filesystem::path sample_csv =
