@@ -20,3 +20,5 @@ QUERY_ID=$((10#$1 + 1))
 mkdir -p "$(dirname "$3")" "$(dirname "$4")"
 
 "${BIN}" "query" "$2" "${QUERY_ID}" "$3" >"$4" 2>&1
+
+echo "Query ${QUERY_ID} Complete"
