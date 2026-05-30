@@ -134,6 +134,7 @@ void AggregateOperatorBase::ExecGlobalOperation<AggregateOperatorBase::Aggregate
         using Value = typename std::decay_t<decltype(values)>::value_type;
 
         if constexpr (std::is_same_v<SetValue, Value>) {
+            unique_values.reserve(unique_values.size() + values.size());
             unique_values.insert(values.begin(), values.end());
         }
     }, state.distinct_values, input);

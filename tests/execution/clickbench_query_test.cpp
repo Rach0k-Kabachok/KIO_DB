@@ -73,6 +73,17 @@ void ExpectConsistentBatch(const ExecBatch& batch) {
     }
 }
 
+void WriteSingleBatchDb(const std::filesystem::path& db_path,
+                        const Schema& schema,
+                        const ctp::ColumnarBatch& batch) {
+    std::error_code ec;
+    std::filesystem::remove(db_path, ec);
+
+    KioDbWriter writer(db_path.string(), schema);
+    writer.WriteBatchToFile(batch);
+    writer.Finalize();
+}
+
 }  // namespace
 
 TEST(ResultWriterTest, WritesAllChildBatchesAsCsv) {
@@ -145,6 +156,139 @@ TEST(TableScanOperatorTest, UsesMinMaxConstraintsToSkipRowGroups) {
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(Values<int64_t>(*result, 0), std::vector<int64_t>({10, 11}));
     EXPECT_FALSE(scan.Next().has_value());
+
+    std::filesystem::remove(db_path, ec);
+}
+
+TEST(ClickBenchQueryRewriteTest, UsesPartialSortingForQueries24To27) {
+    const std::filesystem::path db_path =
+        TestOutputPath("kio_db_clickbench_sort_rewrite.kiodb");
+    std::error_code ec;
+
+    const Schema schema = Schema::FromColumns(
+        {"URL", "EventTime", "SearchPhrase"},
+        {Schema::TEXT, Schema::TIMESTAMP, Schema::TEXT});
+    WriteSingleBatchDb(
+        db_path, schema,
+        ctp::ColumnarBatch{
+            ctp::Column{std::vector<std::string>{
+                "http://google/a", "http://other", "https://google/b",
+                "http://google/c", "http://none"}},
+            ctp::Column{std::vector<int64_t>{30, 5, 20, 10, 15}},
+            ctp::Column{std::vector<std::string>{
+                "zeta", "skip", "beta", "alpha", "aardvark"}}});
+
+    ExecBatch query24 = ExecuteClickBenchQuery(db_path.string(), 24);
+    ExpectConsistentBatch(query24);
+    EXPECT_EQ(query24.row_count, 3);
+    EXPECT_EQ(Values<std::string>(query24, 0),
+              std::vector<std::string>({"http://google/c",
+                                        "https://google/b",
+                                        "http://google/a"}));
+    EXPECT_EQ(Values<int64_t>(query24, 1),
+              std::vector<int64_t>({10, 20, 30}));
+
+    ExecBatch query25 = ExecuteClickBenchQuery(db_path.string(), 25);
+    ExpectConsistentBatch(query25);
+    EXPECT_EQ(Values<std::string>(query25, 0),
+              std::vector<std::string>({"skip", "alpha", "aardvark",
+                                        "beta", "zeta"}));
+
+    ExecBatch query26 = ExecuteClickBenchQuery(db_path.string(), 26);
+    ExpectConsistentBatch(query26);
+    EXPECT_EQ(Values<std::string>(query26, 0),
+              std::vector<std::string>({"aardvark", "alpha", "beta",
+                                        "skip", "zeta"}));
+
+    ExecBatch query27 = ExecuteClickBenchQuery(db_path.string(), 27);
+    ExpectConsistentBatch(query27);
+    EXPECT_EQ(Values<std::string>(query27, 0),
+              std::vector<std::string>({"skip", "alpha", "aardvark",
+                                        "beta", "zeta"}));
+
+    std::filesystem::remove(db_path, ec);
+}
+
+TEST(ClickBenchQueryRewriteTest, ComputesQuery30AfterAggregation) {
+    const std::filesystem::path db_path =
+        TestOutputPath("kio_db_clickbench_query30_rewrite.kiodb");
+    std::error_code ec;
+
+    const Schema schema = Schema::FromColumns(
+        {"ResolutionWidth"}, {Schema::SMALLINT});
+    WriteSingleBatchDb(
+        db_path, schema,
+        ctp::ColumnarBatch{
+            ctp::Column{std::vector<int16_t>{100, 200, 300}}});
+
+    ExecBatch result = ExecuteClickBenchQuery(db_path.string(), 30);
+    ExpectConsistentBatch(result);
+    ASSERT_EQ(result.row_count, 1);
+    ASSERT_EQ(result.schema->ColumnCount(), 90);
+    ASSERT_EQ(result.columns.size(), 90);
+
+    for (size_t idx = 0; idx < 90; ++idx) {
+        EXPECT_EQ(result.schema->ColumnName(idx),
+                  "s" + std::to_string(idx));
+        EXPECT_EQ(Values<int64_t>(result, idx),
+                  std::vector<int64_t>({600 + static_cast<int64_t>(idx) * 3}));
+    }
+
+    std::filesystem::remove(db_path, ec);
+}
+
+TEST(ClickBenchQueryRewriteTest, PreservesQuery35OutputShape) {
+    const std::filesystem::path db_path =
+        TestOutputPath("kio_db_clickbench_query35_rewrite.kiodb");
+    std::error_code ec;
+
+    const Schema schema = Schema::FromColumns({"URL"}, {Schema::TEXT});
+    WriteSingleBatchDb(
+        db_path, schema,
+        ctp::ColumnarBatch{
+            ctp::Column{std::vector<std::string>{
+                "a", "b", "a", "c", "b", "a"}}});
+
+    ExecBatch result = ExecuteClickBenchQuery(db_path.string(), 35);
+    ExpectConsistentBatch(result);
+    EXPECT_EQ(result.row_count, 3);
+    EXPECT_EQ(result.schema->ColumnName(0), "one");
+    EXPECT_EQ(result.schema->ColumnName(1), "URL");
+    EXPECT_EQ(result.schema->ColumnName(2), "c");
+    EXPECT_EQ(Values<int64_t>(result, 0),
+              std::vector<int64_t>({1, 1, 1}));
+    EXPECT_EQ(Values<std::string>(result, 1),
+              std::vector<std::string>({"a", "b", "c"}));
+    EXPECT_EQ(Values<int64_t>(result, 2),
+              std::vector<int64_t>({3, 2, 1}));
+
+    std::filesystem::remove(db_path, ec);
+}
+
+TEST(ClickBenchQueryRewriteTest, PreservesQuery36OutputShape) {
+    const std::filesystem::path db_path =
+        TestOutputPath("kio_db_clickbench_query36_rewrite.kiodb");
+    std::error_code ec;
+
+    const Schema schema = Schema::FromColumns({"ClientIP"}, {Schema::INTEGER});
+    WriteSingleBatchDb(
+        db_path, schema,
+        ctp::ColumnarBatch{
+            ctp::Column{std::vector<int32_t>{10, 11, 10, 12, 11, 10}}});
+
+    ExecBatch result = ExecuteClickBenchQuery(db_path.string(), 36);
+    ExpectConsistentBatch(result);
+    EXPECT_EQ(result.row_count, 3);
+    EXPECT_EQ(result.schema->ColumnName(0), "ClientIP");
+    EXPECT_EQ(result.schema->ColumnName(1), "ClientIPMinus1");
+    EXPECT_EQ(result.schema->ColumnName(2), "ClientIPMinus2");
+    EXPECT_EQ(result.schema->ColumnName(3), "ClientIPMinus3");
+    EXPECT_EQ(result.schema->ColumnName(4), "c");
+    EXPECT_EQ(Values<int32_t>(result, 0), std::vector<int32_t>({10, 11, 12}));
+    EXPECT_EQ(Values<int32_t>(result, 1), std::vector<int32_t>({9, 10, 11}));
+    EXPECT_EQ(Values<int32_t>(result, 2), std::vector<int32_t>({8, 9, 10}));
+    EXPECT_EQ(Values<int32_t>(result, 3), std::vector<int32_t>({7, 8, 9}));
+    EXPECT_EQ(Values<int64_t>(result, 4), std::vector<int64_t>({3, 2, 1}));
 
     std::filesystem::remove(db_path, ec);
 }

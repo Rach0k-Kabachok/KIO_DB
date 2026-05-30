@@ -4,7 +4,6 @@
 #include <utility>
 
 #include "transport/compression/bit_packing_encoding.h"
-#include "transport/compression/compression_codec.h"
 #include "transport/compression/delta_encoding.h"
 #include "transport/compression/delta_length_byte_array_encoding.h"
 #include "transport/compression/dictionary_encoding.h"
@@ -65,17 +64,12 @@ PreparedColumn PrepareColumnForWrite(
     const IColumnEncoding& encoding = SelectEncodingForType(type);
     std::vector<char> encoded_payload = encoding.Encode(column, type);
 
-    const ICompressionCodec& compression =
-        GetCompressionCodec(kio::Compression::NONE);
-    std::vector<char> compressed_payload =
-        compression.Compress(encoded_payload);
-
     PreparedColumn prepared;
-    prepared.payload = std::move(compressed_payload);
+    prepared.payload = std::move(encoded_payload);
     prepared.encoding = encoding.Kind();
-    prepared.compression = compression.Kind();
+    prepared.compression = kio::Compression::NONE;
     prepared.compressed_size = prepared.payload.size();
-    prepared.uncompressed_size = encoded_payload.size();
+    prepared.uncompressed_size = prepared.payload.size();
     return prepared;
 }
 
@@ -86,11 +80,6 @@ ctp::Column DecodeColumnForRead(
     kio::Compression compression,
     uint64_t row_count,
     uint64_t uncompressed_size) {
-    const ICompressionCodec& compression_codec =
-        GetCompressionCodec(compression);
-    std::vector<char> encoded_payload =
-        compression_codec.Decompress(payload, uncompressed_size);
-
     const IColumnEncoding& column_encoding = GetEncoding(encoding);
-    return column_encoding.Decode(encoded_payload, type, row_count);
+    return column_encoding.Decode(payload, type, row_count);
 }

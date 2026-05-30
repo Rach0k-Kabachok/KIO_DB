@@ -145,6 +145,27 @@ ComputeOperator::ComputedColumnSpec ConstantOne() {
         [](const ExecBatch&, size_t) -> scalar::Value { return int64_t{1}; }};
 }
 
+ComputeOperator::ComputedColumnSpec AggregatedSumPlus(std::string sum_column,
+                                                      std::string count_column,
+                                                      int64_t multiplier,
+                                                      std::string result) {
+    return ComputeOperator::ComputedColumnSpec{
+        std::move(result), Schema::BIGINT,
+        [sum_column = std::move(sum_column),
+         count_column = std::move(count_column),
+         multiplier,
+         sum_idx = std::optional<size_t>{},
+         count_idx = std::optional<size_t>{}](
+            const ExecBatch& batch, size_t row_idx) mutable -> scalar::Value {
+            if (!sum_idx.has_value()) {
+                sum_idx = batch.schema->ColumnIndex(sum_column);
+                count_idx = batch.schema->ColumnIndex(count_column);
+            }
+            return Values<int64_t>(batch, *sum_idx)[row_idx] +
+                   multiplier * Values<int64_t>(batch, *count_idx)[row_idx];
+        }};
+}
+
 ComputeOperator::ComputedColumnSpec CaseSource() {
     return ComputeOperator::ComputedColumnSpec{
         "Src", Schema::TEXT,
@@ -351,31 +372,29 @@ std::unique_ptr<IOperator> MakeClickBenchQuery(const std::string& db_filename,
                    CountDistinct("UserID", "uniq")}),
             {SortKey{"c", SortOrder::DESC}}, 10);
     case 24:
-        return Limit(
-            Sort(Filter(Scan(db_filename, AllColumns(db_filename)),
-                        Contains("URL", "google")),
-                 {SortKey{"EventTime", SortOrder::ASC}}),
-            10);
+        return OrderedLimit(
+            Filter(Scan(db_filename, AllColumns(db_filename)),
+                   Contains("URL", "google")),
+            {SortKey{"EventTime", SortOrder::ASC}}, 10);
     case 25:
         return Project(
-            Limit(Sort(Filter(Scan(db_filename, {"SearchPhrase", "EventTime"}),
-                              StringNotEmpty("SearchPhrase")),
-                       {SortKey{"EventTime", SortOrder::ASC}}),
-                  10),
+            OrderedLimit(
+                Filter(Scan(db_filename, {"SearchPhrase", "EventTime"}),
+                       StringNotEmpty("SearchPhrase")),
+                {SortKey{"EventTime", SortOrder::ASC}}, 10),
             {"SearchPhrase"});
     case 26:
-        return Limit(
-            Sort(Filter(Scan(db_filename, {"SearchPhrase"}),
-                        StringNotEmpty("SearchPhrase")),
-                 {SortKey{"SearchPhrase", SortOrder::ASC}}),
-            10);
+        return OrderedLimit(
+            Filter(Scan(db_filename, {"SearchPhrase"}),
+                   StringNotEmpty("SearchPhrase")),
+            {SortKey{"SearchPhrase", SortOrder::ASC}}, 10);
     case 27:
         return Project(
-            Limit(Sort(Filter(Scan(db_filename, {"SearchPhrase", "EventTime"}),
-                              StringNotEmpty("SearchPhrase")),
-                       {SortKey{"EventTime", SortOrder::ASC},
-                        SortKey{"SearchPhrase", SortOrder::ASC}}),
-                  10),
+            OrderedLimit(
+                Filter(Scan(db_filename, {"SearchPhrase", "EventTime"}),
+                       StringNotEmpty("SearchPhrase")),
+                {SortKey{"EventTime", SortOrder::ASC},
+                 SortKey{"SearchPhrase", SortOrder::ASC}}, 10),
             {"SearchPhrase"});
     case 28:
         return OrderedLimit(
@@ -402,17 +421,20 @@ std::unique_ptr<IOperator> MakeClickBenchQuery(const std::string& db_filename,
             {SortKey{"l", SortOrder::DESC}}, 25);
     case 30: {
         std::vector<ComputeOperator::ComputedColumnSpec> computed;
-        std::vector<AggregateSpec> aggregates{Sum("ResolutionWidth", "s0")};
+        std::vector<std::string> output_columns{"s0"};
         computed.reserve(89);
-        aggregates.reserve(90);
+        output_columns.reserve(90);
         for (int64_t idx = 1; idx < 90; idx++) {
-            const std::string name = "rw_" + std::to_string(idx);
-            computed.push_back(SmallIntPlus("ResolutionWidth", idx, name));
-            aggregates.push_back(Sum(name, "s" + std::to_string(idx)));
+            const std::string name = "s" + std::to_string(idx);
+            computed.push_back(
+                AggregatedSumPlus("s0", "c", idx, name));
+            output_columns.push_back(name);
         }
-        return Global(
-            Compute(Scan(db_filename, {"ResolutionWidth"}), std::move(computed)),
-            std::move(aggregates));
+        return Project(
+            Compute(Global(Scan(db_filename, {"ResolutionWidth"}),
+                           {Sum("ResolutionWidth", "s0"), Count("c")}),
+                    std::move(computed)),
+            std::move(output_columns));
     }
     case 31:
         return OrderedLimit(
@@ -449,18 +471,20 @@ std::unique_ptr<IOperator> MakeClickBenchQuery(const std::string& db_filename,
             {SortKey{"c", SortOrder::DESC}}, 10);
     case 35:
         return OrderedLimit(
-            Group(Compute(Scan(db_filename, {"URL"}), {ConstantOne()}),
-                  {"one", "URL"}, {Count("c")}),
+            Project(Compute(Group(Scan(db_filename, {"URL"}),
+                                  {"URL"}, {Count("c")}),
+                            {ConstantOne()}),
+                    {"one", "URL", "c"}),
             {SortKey{"c", SortOrder::DESC}}, 10);
     case 36:
         return OrderedLimit(
-            Group(Compute(Scan(db_filename, {"ClientIP"}),
-                          {Int32Minus("ClientIP", 1, "ClientIPMinus1"),
-                           Int32Minus("ClientIP", 2, "ClientIPMinus2"),
-                           Int32Minus("ClientIP", 3, "ClientIPMinus3")}),
-                  {"ClientIP", "ClientIPMinus1",
-                   "ClientIPMinus2", "ClientIPMinus3"},
-                  {Count("c")}),
+            Project(Compute(Group(Scan(db_filename, {"ClientIP"}),
+                                  {"ClientIP"}, {Count("c")}),
+                            {Int32Minus("ClientIP", 1, "ClientIPMinus1"),
+                             Int32Minus("ClientIP", 2, "ClientIPMinus2"),
+                             Int32Minus("ClientIP", 3, "ClientIPMinus3")}),
+                    {"ClientIP", "ClientIPMinus1", "ClientIPMinus2",
+                     "ClientIPMinus3", "c"}),
             {SortKey{"c", SortOrder::DESC}}, 10);
     case 37:
         return OrderedLimit(

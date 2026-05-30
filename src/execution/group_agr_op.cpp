@@ -102,6 +102,7 @@ std::optional<ExecBatch> GroupAgrOperator::Next() {
 
     auto execute_single_key_groups = [&]<typename Key>() -> ExecBatch {
         std::unordered_map<Key, std::vector<AggregateState>> groups;
+        groups.reserve(first_batch.row_count);
 
         while (optional_batch.has_value()) {
             ExecBatch& exec_batch = optional_batch.value();
@@ -158,6 +159,7 @@ std::optional<ExecBatch> GroupAgrOperator::Next() {
     std::unordered_map<scalar::Row, std::vector<AggregateState>,
                        scalar::RowHash>
         groups;
+    groups.reserve(first_batch.row_count);
 
     while (optional_batch.has_value()) {
         ExecBatch& exec_batch = optional_batch.value();

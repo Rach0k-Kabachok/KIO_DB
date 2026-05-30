@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <stdexcept>
 #include <vector>
 
@@ -16,6 +17,24 @@ uint8_t ComputeBitWidth(uint64_t value) {
         value >>= 1;
     }
     return width;
+}
+
+uint64_t MaskForBitWidth(uint8_t bit_width) {
+    return bit_width == 64
+        ? ~uint64_t{0}
+        : (uint64_t{1} << bit_width) - 1;
+}
+
+uint64_t ReadPackedWord(const std::vector<char>& payload,
+                        size_t byte_offset,
+                        size_t data_limit) {
+    uint64_t word = 0;
+    if (byte_offset < data_limit) {
+        const size_t available =
+            std::min(sizeof(word), data_limit - byte_offset);
+        std::memcpy(&word, payload.data() + byte_offset, available);
+    }
+    return word;
 }
 
 template <typename T>
@@ -96,21 +115,28 @@ std::vector<uint64_t> DecodeUnsignedValues(
         return result;
     }
 
+    const size_t data_offset = offset;
+    const size_t packed_bytes = (value_count * bit_width + 7) / 8;
+    const size_t data_limit = data_offset + packed_bytes;
+    const uint64_t mask = MaskForBitWidth(bit_width);
     size_t bit_pos = 0;
     for (uint64_t value_idx = 0; value_idx < value_count; ++value_idx) {
-        uint64_t value = 0;
-        for (uint8_t bit = 0; bit < bit_width; ++bit) {
-            const unsigned char byte =
-                static_cast<unsigned char>(payload[offset + bit_pos / 8]);
-            if ((byte & (uint8_t{1} << (bit_pos % 8))) != 0) {
-                value |= uint64_t{1} << bit;
-            }
-            ++bit_pos;
+        const size_t byte_offset = data_offset + bit_pos / 8;
+        const uint8_t bit_offset = static_cast<uint8_t>(bit_pos % 8);
+
+        uint64_t value =
+            ReadPackedWord(payload, byte_offset, data_limit) >> bit_offset;
+        if (bit_offset != 0 && bit_offset + bit_width > 64) {
+            value |= ReadPackedWord(
+                payload, byte_offset + sizeof(uint64_t), data_limit)
+                << (64 - bit_offset);
         }
-        result[value_idx] = value;
+
+        result[value_idx] = value & mask;
+        bit_pos += bit_width;
     }
 
-    offset += (value_count * bit_width + 7) / 8;
+    offset += packed_bytes;
     return result;
 }
 

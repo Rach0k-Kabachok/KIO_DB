@@ -7,6 +7,7 @@
 #include "gtest/gtest.h"
 
 #include "global/columnar_types.h"
+#include "transport/compression/bit_packing_encoding.h"
 #include "transport/compression/column_encoding.h"
 #include "transport/kio/kio_db_reader.h"
 #include "transport/kio/kio_db_writer.h"
@@ -19,6 +20,14 @@ void ExpectRoundTrip(const ctp::Column& column, Schema::Types type,
         GetEncoding(encoding);
     const std::vector<char> payload = codec.Encode(column, type);
     EXPECT_EQ(codec.Decode(payload, type, row_count), column);
+}
+
+void ExpectUnsignedBitPackingRoundTrip(
+    const std::vector<uint64_t>& values) {
+    const std::vector<char> payload = EncodeUnsignedValues(values);
+    size_t offset = 0;
+    EXPECT_EQ(DecodeUnsignedValues(payload, offset, values.size()), values);
+    EXPECT_EQ(offset, payload.size());
 }
 
 std::filesystem::path CompressionTestOutputPath(
@@ -51,6 +60,42 @@ TEST(ColumnEncodingTest, RoundTripsRle) {
 TEST(ColumnEncodingTest, RoundTripsBitPacking) {
     ctp::Column column{std::vector<int32_t>{0, 1, -1, 32, -32}};
     ExpectRoundTrip(column, Schema::INTEGER, kio::Encoding::BIT_PACKING, 5);
+}
+
+TEST(ColumnEncodingTest, RoundTripsUnsignedBitPackingBoundaryWidths) {
+    ExpectUnsignedBitPackingRoundTrip(std::vector<uint64_t>{0, 0, 0, 0});
+    ExpectUnsignedBitPackingRoundTrip(std::vector<uint64_t>{0, 1, 1, 0, 1});
+    ExpectUnsignedBitPackingRoundTrip(
+        std::vector<uint64_t>{0, 63, 127, 5, 91});
+    ExpectUnsignedBitPackingRoundTrip(
+        std::vector<uint64_t>{0, 255, 256, 511, 17});
+    ExpectUnsignedBitPackingRoundTrip(
+        std::vector<uint64_t>{0, 65535, 131071, 42});
+    ExpectUnsignedBitPackingRoundTrip(
+        std::vector<uint64_t>{0, (uint64_t{1} << 31) - 1,
+                              (uint64_t{1} << 30) + 7});
+    ExpectUnsignedBitPackingRoundTrip(
+        std::vector<uint64_t>{0, (uint64_t{1} << 63) - 1,
+                              (uint64_t{1} << 62) + 123});
+    ExpectUnsignedBitPackingRoundTrip(
+        std::vector<uint64_t>{0, ~uint64_t{0}, uint64_t{1} << 63});
+}
+
+TEST(ColumnEncodingTest, RoundTripsUnsignedBitPackingAcrossWordBoundaries) {
+    std::vector<uint64_t> width9_values;
+    width9_values.reserve(101);
+    for (uint64_t idx = 0; idx < 100; ++idx) {
+        width9_values.push_back((idx * 37) % 512);
+    }
+    width9_values.push_back(511);
+    ExpectUnsignedBitPackingRoundTrip(width9_values);
+
+    std::vector<uint64_t> width17_values;
+    width17_values.reserve(96);
+    for (uint64_t idx = 0; idx < 96; ++idx) {
+        width17_values.push_back((idx * 4099) % 131072);
+    }
+    ExpectUnsignedBitPackingRoundTrip(width17_values);
 }
 
 TEST(ColumnEncodingTest, RoundTripsDeltaLengthByteArray) {
