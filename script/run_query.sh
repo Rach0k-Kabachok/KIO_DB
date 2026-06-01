@@ -11,6 +11,7 @@ OUTPUT_CSV="$3"
 LOG_FILE="$4"
 QUERY_ID=$((10#$1 + 1))
 TIMES_CSV="${QUERY_TIMES_CSV:-$(dirname "${LOG_FILE}")/query_times.csv}"
+TIME_FILE="${QUERY_TIME_FILE:-/tmp/kio_last_query_time_ms}"
 
 mkdir -p "$(dirname "${OUTPUT_CSV}")" "$(dirname "${LOG_FILE}")"
 mkdir -p "$(dirname "${TIMES_CSV}")"
@@ -27,6 +28,7 @@ END_NS="$(date +%s%N)"
 ELAPSED_MS=$(((END_NS - START_NS) / 1000000))
 
 echo "${ZERO_BASED_QUERY_ID},${ELAPSED_MS}" >>"${TIMES_CSV}"
+echo "${ELAPSED_MS}" >"${TIME_FILE}"
 
 if [[ "${STATUS}" -eq 0 ]]; then
     echo "Query ${QUERY_ID} Complete (${ELAPSED_MS} ms)"

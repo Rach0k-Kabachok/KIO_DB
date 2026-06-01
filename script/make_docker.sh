@@ -51,14 +51,22 @@ export CONVERT_TIMES_CSV
 ./script/convert.sh "${INPUT_CSV}" "${COLUMNAR}"
 
 TIMES_CSV="${RESULTS}/query_times.csv"
-echo "query,time_ms" > "${TIMES_CSV}"
-export QUERY_TIMES_CSV="${TIMES_CSV}"
+echo "query,cold_ms,hot_ms,hot2_ms" > "${TIMES_CSV}"
+export QUERY_TIMES_CSV="/tmp/query_times_raw.csv"
+export QUERY_TIME_FILE="/tmp/query_time_ms"
+echo "query,time_ms" > "${QUERY_TIMES_CSV}"
 
 for QUERY_NUM in {0..42}; do
-    OUTPUT="${RESULTS}/query_${QUERY_NUM}.csv"
-    LOGS="${RESULTS}/query_${QUERY_NUM}.log"
+    ./script/run_query.sh "${QUERY_NUM}" "${COLUMNAR}" "${RESULTS}/query_${QUERY_NUM}.csv" "${RESULTS}/query_${QUERY_NUM}_cold.log"
+    COLD_MS="$(cat "${QUERY_TIME_FILE}")"
 
-    ./script/run_query.sh "${QUERY_NUM}" "${COLUMNAR}" "${OUTPUT}" "${LOGS}"
+    ./script/run_query.sh "${QUERY_NUM}" "${COLUMNAR}" "/tmp/query_${QUERY_NUM}_hot.csv" "${RESULTS}/query_${QUERY_NUM}_hot.log"
+    HOT_MS="$(cat "${QUERY_TIME_FILE}")"
+
+    ./script/run_query.sh "${QUERY_NUM}" "${COLUMNAR}" "/tmp/query_${QUERY_NUM}_hot2.csv" "${RESULTS}/query_${QUERY_NUM}_hot2.log"
+    HOT2_MS="$(cat "${QUERY_TIME_FILE}")"
+
+    echo "${QUERY_NUM},${COLD_MS},${HOT_MS},${HOT2_MS}" >> "${TIMES_CSV}"
 done
 
 echo "Query times saved to ${TIMES_CSV}"
