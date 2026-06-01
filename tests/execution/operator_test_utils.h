@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-#include "execution/operators.h"
+#include "execution/operator.h"
 #include "global/column_operations.h"
 #include "global/columnar_types.h"
 #include "global/schema.h"

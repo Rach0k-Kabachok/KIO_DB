@@ -9,9 +9,9 @@
 
 #include "gtest/gtest.h"
 
-#include "execution/clickbench_queries.h"
-#include "execution/operators.h"
-#include "execution/result_writer.h"
+#include "execution/operators/result_writer_op.h"
+#include "execution/operators/table_scan_op.h"
+#include "execution/query_executor/clickbench_queries.h"
 #include "global/column_operations.h"
 #include "global/columnar_types.h"
 #include "global/schema.h"

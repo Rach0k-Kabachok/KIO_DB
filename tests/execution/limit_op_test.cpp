@@ -8,7 +8,10 @@
 
 #include "gtest/gtest.h"
 
-#include "execution/operators.h"
+#include "execution/operators/compute_op.h"
+#include "execution/operators/filter_op.h"
+#include "execution/operators/limit_op.h"
+#include "execution/operators/project_op.h"
 #include "operator_test_utils.h"
 
 namespace {

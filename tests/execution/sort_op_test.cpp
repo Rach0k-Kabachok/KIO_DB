@@ -7,7 +7,7 @@
 
 #include "gtest/gtest.h"
 
-#include "execution/operators.h"
+#include "execution/operators/sort_ops.h"
 #include "operator_test_utils.h"
 
 namespace {

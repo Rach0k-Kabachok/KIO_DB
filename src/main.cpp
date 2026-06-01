@@ -4,8 +4,8 @@
 #include <stdexcept>
 #include <string>
 
-#include "execution/clickbench_queries.h"
-#include "execution/result_writer.h"
+#include "execution/operators/result_writer_op.h"
+#include "execution/query_executor/clickbench_queries.h"
 #include "global/schema.h"
 #include "transport/csv/csv_exporter.h"
 #include "transport/kio/kio_db_importer.h"
