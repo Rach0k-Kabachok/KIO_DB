@@ -127,13 +127,20 @@ public:
     };
 
     struct AggregateState {
+        AggregateState();
+        AggregateState(const AggregateState& other);
+        AggregateState& operator=(const AggregateState& other);
+        AggregateState(AggregateState&&) noexcept;
+        AggregateState& operator=(AggregateState&&) noexcept;
+        ~AggregateState();
+
         size_t column_idx = 0;
         Schema::Types input_type = Schema::BIGINT;
         Schema::Types result_type = Schema::BIGINT;
         ctp::Column result;
         int64_t avg_count = 0;
         double avg_sum = 0.0;
-        scalar::DistinctSet distinct_values;
+        std::unique_ptr<scalar::DistinctSet> distinct_values;
     };
 protected:
     explicit AggregateOperatorBase(const std::vector<AggregateSpec>& aggregates);

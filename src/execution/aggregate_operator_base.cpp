@@ -1,6 +1,7 @@
 #include "operators.h"
 
 #include <cstdint>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -37,6 +38,53 @@ AggregateOperatorBase::AggregateOperatorBase(
         const std::vector<AggregateSpec>& aggregates) :
         aggregates_(aggregates) {
 }
+
+AggregateOperatorBase::AggregateState::AggregateState() = default;
+
+AggregateOperatorBase::AggregateState::AggregateState(
+        const AggregateState& other) :
+        column_idx(other.column_idx),
+        input_type(other.input_type),
+        result_type(other.result_type),
+        result(other.result),
+        avg_count(other.avg_count),
+        avg_sum(other.avg_sum) {
+    if (other.distinct_values) {
+        distinct_values =
+            std::make_unique<scalar::DistinctSet>(*other.distinct_values);
+    }
+}
+
+AggregateOperatorBase::AggregateState&
+AggregateOperatorBase::AggregateState::operator=(
+        const AggregateState& other) {
+    if (this == &other) {
+        return *this;
+    }
+
+    column_idx = other.column_idx;
+    input_type = other.input_type;
+    result_type = other.result_type;
+    result = other.result;
+    avg_count = other.avg_count;
+    avg_sum = other.avg_sum;
+    if (other.distinct_values) {
+        distinct_values =
+            std::make_unique<scalar::DistinctSet>(*other.distinct_values);
+    } else {
+        distinct_values.reset();
+    }
+    return *this;
+}
+
+AggregateOperatorBase::AggregateState::AggregateState(
+        AggregateState&&) noexcept = default;
+
+AggregateOperatorBase::AggregateState&
+AggregateOperatorBase::AggregateState::operator=(
+        AggregateState&&) noexcept = default;
+
+AggregateOperatorBase::AggregateState::~AggregateState() = default;
 
 template<>
 void AggregateOperatorBase::ExecGlobalOperation<AggregateOperatorBase::AggregateKind::COUNT>(
@@ -137,7 +185,7 @@ void AggregateOperatorBase::ExecGlobalOperation<AggregateOperatorBase::Aggregate
             unique_values.reserve(unique_values.size() + values.size());
             unique_values.insert(values.begin(), values.end());
         }
-    }, state.distinct_values, input);
+    }, *state.distinct_values, input);
 }
 
 
@@ -233,7 +281,7 @@ void AggregateOperatorBase::ExecGroupOperation<AggregateOperatorBase::AggregateK
         if constexpr (std::is_same_v<SetValue, Value>) {
             unique_values.insert(values[row_idx]);
         }
-    }, state.distinct_values, input);
+    }, *state.distinct_values, input);
 }
 
 std::vector<AggregateOperatorBase::AggregateState>
@@ -273,7 +321,9 @@ AggregateOperatorBase::MakeAggregateStates(
         }
 
         if (aggregate.kind == AggregateOperatorBase::AggregateKind::COUNT_DISTINCT) {
-            state.distinct_values = scalar::MakeDistinctSet(state.input_type);
+            state.distinct_values =
+                std::make_unique<scalar::DistinctSet>(
+                    scalar::MakeDistinctSet(state.input_type));
         }
 
         aggregate_states.push_back(std::move(state));
@@ -359,7 +409,7 @@ ctp::ColumnarBatch AggregateOperatorBase::FinalizeAggregation(
         } else if (aggregates_[idx].kind ==
                    AggregateOperatorBase::AggregateKind::COUNT_DISTINCT) {
             std::get<std::vector<int64_t>>(aggregate_states[idx].result)[0] =
-                scalar::DistinctCount(aggregate_states[idx].distinct_values);
+                scalar::DistinctCount(*aggregate_states[idx].distinct_values);
         }
     }
 
