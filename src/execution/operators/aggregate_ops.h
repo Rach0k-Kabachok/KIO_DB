@@ -54,11 +54,6 @@ protected:
     void ExecGlobalOperation(AggregateState& state,
                              const ExecBatch& exec_batch);
 
-    template<AggregateKind TYPE>
-    void ExecGroupOperation(AggregateState& state,
-                            const ExecBatch& exec_batch,
-                            size_t row_idx);
-
     std::vector<AggregateState> MakeAggregateStates(
         const ExecBatch& first_batch,
         std::vector<std::string>& result_names,
@@ -66,9 +61,6 @@ protected:
 
     void ApplyAggregateOperation(size_t idx, AggregateState& state,
                                  const ExecBatch& exec_batch);
-    void ApplyAggregateOperation(size_t idx, AggregateState& state,
-                                 const ExecBatch& exec_batch,
-                                 size_t row_idx);
 
     ctp::ColumnarBatch FinalizeAggregation(
         std::vector<AggregateState>& aggregate_states) const;

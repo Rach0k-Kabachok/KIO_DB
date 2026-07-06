@@ -25,8 +25,6 @@ public:
 
     std::string ReadNextBuffer();
 
-    bool IsEOF() const;
-
 private:
     size_t CutBatchToNewLine(const std::string &buffer);
 

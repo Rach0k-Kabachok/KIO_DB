@@ -120,12 +120,12 @@ std::optional<ExecBatch> TableScanOperator::Next() {
             break;
         }
         reader_.SkipNextBatch();
-        row_group = reader_.PeekNextRowGroupMeta();
     }
 
     if (row_group == nullptr) {
         return std::nullopt;
     }
+
     const size_t row_count = row_group->batch.row_num;
 
     ctp::ColumnarBatch columns = reader_.ReadNextBatch(column_indices_).value();

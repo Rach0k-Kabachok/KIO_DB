@@ -135,13 +135,12 @@ void KioDbWriter::Finalize() {
         throw std::runtime_error("Failed to get footer position");
     }
 
-    const uint64_t footer_offset = static_cast<uint64_t>(footer_pos);
+    kio_file_.seekp(kFooterOffsetPosition);
+    bio::WritePod(kio_file_, static_cast<uint64_t>(footer_pos));
+    kio_file_.seekp(footer_pos);
+
     WriteFooter();
 
-    const std::streampos end_pos = kio_file_.tellp();
-    kio_file_.seekp(kFooterOffsetPosition);
-    bio::WritePod(kio_file_, footer_offset);
-    kio_file_.seekp(end_pos);
     kio_file_.flush();
     finalized_ = true;
 }

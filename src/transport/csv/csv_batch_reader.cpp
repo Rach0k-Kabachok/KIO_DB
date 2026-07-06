@@ -98,7 +98,3 @@ std::string CSVBatchReader::ReadNextBuffer() {
         }
     }
 }
-
-bool CSVBatchReader::IsEOF() const {
-    return eof_reached_;
-}

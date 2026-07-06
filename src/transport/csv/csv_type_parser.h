@@ -1,7 +1,6 @@
 #pragma once
 
 #include <charconv>
-#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <string_view>

@@ -56,6 +56,7 @@ ctp::ColumnarBatch CSVColumnarReader::MakeEmptyBatch(size_t reserve_rows) const 
     return batch;
 }
 
+// TODO Вот тут подумать, как быстрее добавлять
 void CSVColumnarReader::AppendField(ctp::ColumnarBatch& batch, size_t col_idx,
                                     std::string_view field) const {
     switch (schema_.ColumnType(col_idx)) {

@@ -6,14 +6,9 @@
 #include <vector>
 
 #include "columnar_types.h"
-#include "transport/kio/kio_format.h"
 #include "schema.h"
 
 namespace kio {
-
-size_t GetColumnPayloadSize(const ctp::Column& column);
-
-size_t GetBatchPayloadSize(const ctp::ColumnarBatch& batch);
 
 std::vector<char> SerializeColumn(const ctp::Column& column,
                                   Schema::Types type);

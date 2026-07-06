@@ -10,7 +10,7 @@
 #include "transport/compression/plain_encoding.h"
 #include "transport/compression/rle_encoding.h"
 
-namespace {
+namespace { // придумать, как сделать полиморфизм покрасивее
 const PlainEncoding kPlainEncoding;
 const RleEncoding kRleEncoding;
 const DictionaryEncoding kDictionaryEncoding;
@@ -80,6 +80,7 @@ ctp::Column DecodeColumnForRead(
     kio::Compression compression,
     uint64_t row_count,
     uint64_t uncompressed_size) {
+
     const IColumnEncoding& column_encoding = GetEncoding(encoding);
     return column_encoding.Decode(payload, type, row_count);
 }

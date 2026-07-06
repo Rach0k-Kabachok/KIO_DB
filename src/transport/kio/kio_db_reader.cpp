@@ -76,8 +76,7 @@ std::optional<ctp::ColumnarBatch> KioDbReader::ReadNextBatch(
 
         const kio::ColumnChunkInfo& chunk = row_group.columns[col_idx];
         kio_file_.clear();
-        kio_file_.seekg(static_cast<std::streamoff>(
-            row_group.batch.batch_start_offset + chunk.local_offset));
+        kio_file_.seekg(row_group.batch.batch_start_offset + chunk.local_offset);
         if (!kio_file_.good()) {
             throw std::runtime_error("Failed to seek KIO column chunk");
         }
@@ -119,7 +118,7 @@ void KioDbReader::ReadHeader() {
 }
 
 void KioDbReader::ReadFooter(uint64_t footer_offset) {
-    kio_file_.seekg(static_cast<std::streamoff>(footer_offset));
+    kio_file_.seekg(footer_offset);
     if (!kio_file_.good()) {
         throw std::runtime_error("Failed to seek KIO footer");
     }
@@ -155,7 +154,7 @@ Schema KioDbReader::ReadSchema() {
                                std::move(column_types));
 }
 
-kio::ColumnChunkInfo KioDbReader::ReadColumnChunkInfo() {
+kio::ColumnChunkInfo KioDbReader::ReadColumnChunkInfo() { // Надо попробовать прочитать за один раз
     kio::ColumnChunkInfo chunk;
     chunk.local_offset = bio::ReadPod<uint64_t>(kio_file_);
     chunk.size = bio::ReadPod<uint64_t>(kio_file_);

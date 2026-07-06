@@ -6,34 +6,6 @@
 
 namespace kio {
 
-size_t GetColumnPayloadSize(const ctp::Column& column) {
-    size_t result = 0;
-
-    std::visit([&result](const auto& values) {
-        using Values = std::decay_t<decltype(values)>;
-        using Value = typename Values::value_type;
-
-        if constexpr (std::is_same_v<Value, std::string>) {
-            result += sizeof(uint64_t) * values.size();
-            for (const auto& value : values) {
-                result += value.size();
-            }
-        } else {
-            result += sizeof(Value) * values.size();
-        }
-    }, column);
-
-    return result;
-}
-
-size_t GetBatchPayloadSize(const ctp::ColumnarBatch& batch) {
-    size_t result = 0;
-    for (const auto& column : batch) {
-        result += GetColumnPayloadSize(column);
-    }
-    return result;
-}
-
 std::vector<char> SerializeStringColumn(
     const std::vector<std::string>& strings) {
     std::vector<uint64_t> str_sizes;
